@@ -1,46 +1,54 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Login from './components/Login';
+import Register from './components/Register';
+import Dashboard from './components/Dashboard';
+import AuthService from './utils/auth';
 import './App.css';
 
-// Set base URL for API calls
-axios.defaults.baseURL = process.env.REACT_APP_API_URL;
+// Protected Route Component
+const ProtectedRoute = ({ children }) => {
+  return AuthService.isAuthenticated() ? children : <Navigate to="/login" />;
+};
+
+// Public Route Component (redirect to dashboard if already authenticated)
+const PublicRoute = ({ children }) => {
+  return !AuthService.isAuthenticated() ? children : <Navigate to="/dashboard" />;
+};
 
 function App() {
-  const [serverStatus, setServerStatus] = useState('');
-  const [testMessage, setTestMessage] = useState('');
-
-  // Test server connection on component mount
-  useEffect(() => {
-    const testConnection = async () => {
-      try {
-        const healthResponse = await axios.get('/health');
-        setServerStatus(healthResponse.data.status);
-        
-        const testResponse = await axios.get('/test');
-        setTestMessage(testResponse.data.message);
-      } catch (error) {
-        console.error('Connection error:', error);
-        setServerStatus('Failed to connect to server');
-      }
-    };
-
-    testConnection();
-  }, []);
-
   return (
-    <div className="App">
-      <header className="App-header">
-        <h1>Project Setup Complete 🎉</h1>
-        <div className="status-container">
-          <h2>Connection Status</h2>
-          <p><strong>Server:</strong> {serverStatus || 'Testing...'}</p>
-          <p><strong>Test Message:</strong> {testMessage || 'Loading...'}</p>
-        </div>
-        <p>
-          React Frontend + Express Backend + MongoDB Atlas
-        </p>
-      </header>
-    </div>
+    <Router>
+      <div className="App">
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" />} />
+          <Route 
+            path="/login" 
+            element={
+              <PublicRoute>
+                <Login />
+              </PublicRoute>
+            } 
+          />
+          <Route 
+            path="/register" 
+            element={
+              <PublicRoute>
+                <Register />
+              </PublicRoute>
+            } 
+          />
+          <Route 
+            path="/dashboard" 
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            } 
+          />
+        </Routes>
+      </div>
+    </Router>
   );
 }
 

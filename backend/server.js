@@ -10,6 +10,8 @@ app.use(cors());
 app.use(express.json());
 
 // routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/protected', require('./routes/protected'));
 app.use('/api', require('./routes/test'));
 
 // MongoDB Connection

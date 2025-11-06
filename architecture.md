@@ -9,26 +9,119 @@ Telegraph is a full-stack web application with a React frontend and Express.js b
 
 ### Health & Test Endpoints
 - `GET /health` - Server health check
+  - **Response**: `{ status: "Server is running!", timestamp: "ISO_DATE" }`
+
 - `GET /test` - Basic backend test
+  - **Response**: `{ message: "Backend is working!" }`
+
 - `POST /test-db` - Test MongoDB connection (saves a test document)
+  - **Response**: `{ success: true, message: "MongoDB connection working!", data: testDoc }`
+
 - `GET /test-db` - Get all test documents
+  - **Response**: `{ success: true, data: [testDocuments] }`
 
 ### Authentication Endpoints (`/auth`)
 - `POST /auth/register` - Register a new user
+  - **Access**: Public
+  - **Body**: `{ username, email, password }`
+  - **Validation**: Username (3-30 chars, alphanumeric + underscore), valid email, password (min 6 chars)
+  - **Response**: `{ success: true, data: { user, token } }`
+
 - `POST /auth/login` - Login user
-- `GET /auth/me` - Get current user profile (requires authentication)
+  - **Access**: Public
+  - **Body**: `{ email, password }`
+  - **Response**: `{ success: true, data: { user, token } }`
+
+- `GET /auth/me` - Get current user profile
+  - **Access**: Private (JWT required)
+  - **Response**: `{ success: true, data: { user } }`
 
 ### Protected Endpoints (`/protected`)
-- `GET /protected/test` - Test protected route (requires authentication)
-- `GET /protected/admin-test` - Test admin-only route (requires admin role)
+- `GET /protected/test` - Test protected route
+  - **Access**: Private (JWT required)
+  - **Response**: `{ success: true, message: "Access granted", user, timestamp }`
+
+- `GET /protected/admin-test` - Test admin-only route
+  - **Access**: Private (Admin role required)
+  - **Response**: `{ success: true, message: "Welcome, Admin!", user, timestamp }`
 
 ### Receiver Management Endpoints (`/receivers`)
-- `POST /receivers` - Add a new receiver (requires authentication)
-- `GET /receivers` - Get all receivers for current user with pagination/search (requires authentication)
-- `GET /receivers/:id` - Get single receiver by ID (requires authentication)
-- `PUT /receivers/:id` - Update a receiver (requires authentication)
-- `DELETE /receivers/:id` - Delete a receiver (requires authentication)
-- `GET /receivers/stats/count` - Get receiver statistics (total and recent) (requires authentication)
+- `POST /receivers` - Add a new receiver
+  - **Access**: Private (JWT required)
+  - **Body**: `{ name, email, phone?, company?, department?, tags?, notes? }`
+  - **Validation**: Required name/email, optional fields with length limits
+  - **Security**: Email encrypted in database
+  - **Response**: `{ success: true, data: { receiver } }`
+
+- `GET /receivers` - Get all receivers for current user with pagination/search
+  - **Access**: Private (JWT required)
+  - **Query Params**: `page, limit, search, sortBy, sortOrder`
+  - **Features**: Search by name/company/department/tags, pagination, sorting
+  - **Security**: Emails decrypted for response
+  - **Response**: `{ success: true, data: { receivers, pagination } }`
+
+- `GET /receivers/:id` - Get single receiver by ID
+  - **Access**: Private (JWT required, ownership verified)
+  - **Security**: Email decrypted for response
+  - **Response**: `{ success: true, data: { receiver } }`
+
+- `PUT /receivers/:id` - Update a receiver
+  - **Access**: Private (JWT required, ownership verified)
+  - **Body**: `{ name, email, phone?, company?, department?, tags?, notes? }`
+  - **Security**: Email encrypted on save
+  - **Response**: `{ success: true, data: { receiver } }`
+
+- `DELETE /receivers/:id` - Delete a receiver
+  - **Access**: Private (JWT required, ownership verified)
+  - **Response**: `{ success: true, message: "Receiver deleted successfully" }`
+
+- `GET /receivers/stats/count` - Get receiver statistics
+  - **Access**: Private (JWT required)
+  - **Response**: `{ success: true, data: { total, recent } }`
+
+### Draft Management Endpoints (`/api/drafts`)
+- `GET /api/drafts/templates` - Get all available email templates
+  - **Access**: Private (JWT required)
+  - **Response**: `{ success: true, data: { templates: [templateObjects] } }`
+
+- `GET /api/drafts/templates/:id` - Get specific template by ID
+  - **Access**: Private (JWT required)
+  - **Response**: `{ success: true, data: { template } }`
+
+- `POST /api/drafts` - Create a new draft
+  - **Access**: Private (JWT required)
+  - **Body**: `{ title, subject, body, receivers?, template?, tags? }`
+  - **Validation**: Required title/subject/body, optional arrays
+  - **Security**: Verifies receiver ownership
+  - **Response**: `{ success: true, data: { draft } }`
+
+- `GET /api/drafts` - Get all drafts for current user
+  - **Access**: Private (JWT required)
+  - **Query Params**: `page, limit, status, category, search, sortBy, sortOrder`
+  - **Features**: Filter by status/category, search, pagination, sorting
+  - **Response**: `{ success: true, data: { drafts, pagination } }`
+
+- `GET /api/drafts/stats` - Get draft statistics
+  - **Access**: Private (JWT required)
+  - **Response**: `{ success: true, data: { totalDrafts, draftsByStatus, draftsByCategory, recentDrafts } }`
+
+- `GET /api/drafts/:id` - Get single draft by ID
+  - **Access**: Private (JWT required, ownership verified)
+  - **Response**: `{ success: true, data: { draft } }`
+
+- `PUT /api/drafts/:id` - Update a draft
+  - **Access**: Private (JWT required, ownership verified)
+  - **Body**: `{ title, subject, body, receivers?, template?, tags? }`
+  - **Security**: Verifies receiver ownership
+  - **Response**: `{ success: true, data: { draft } }`
+
+- `DELETE /api/drafts/:id` - Delete a draft
+  - **Access**: Private (JWT required, ownership verified)
+  - **Response**: `{ success: true, message: "Draft deleted successfully" }`
+
+- `POST /api/drafts/:id/duplicate` - Duplicate a draft
+  - **Access**: Private (JWT required, ownership verified)
+  - **Response**: `{ success: true, data: { draft } }`
 
 ## Frontend Routes
 
@@ -64,6 +157,19 @@ Telegraph is a full-stack web application with a React frontend and Express.js b
 ### Test Model
 - `message` (String)
 - `timestamp` (Date, default: now)
+
+### Draft Model
+- `userId` (ObjectId, reference to User)
+- `title` (String, required)
+- `subject` (String, required)
+- `body` (String, required)
+- `receivers` (Array of ObjectIds, references to Receiver)
+- `template` (Object: `{ name, category }`)
+- `tags` (Array of Strings)
+- `status` (String: 'draft', 'scheduled', 'sent', default: 'draft')
+- `draftId` (Number, auto-incremented)
+- `createdAt` (Date)
+- `lastEdited` (Date)
 
 ## Authentication Flow
 1. User registers via `POST /auth/register`

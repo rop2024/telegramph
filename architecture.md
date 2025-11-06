@@ -79,47 +79,47 @@ Telegraph is a full-stack web application with a React frontend and Express.js b
   - **Access**: Private (JWT required)
   - **Response**: `{ success: true, data: { total, recent } }`
 
-### Draft Management Endpoints (`/api/drafts`)
-- `GET /api/drafts/templates` - Get all available email templates
+### Draft Management Endpoints (`/drafts`)
+- `GET /drafts/templates` - Get all available email templates
   - **Access**: Private (JWT required)
   - **Response**: `{ success: true, data: { templates: [templateObjects] } }`
 
-- `GET /api/drafts/templates/:id` - Get specific template by ID
+- `GET /drafts/templates/:id` - Get specific template by ID
   - **Access**: Private (JWT required)
   - **Response**: `{ success: true, data: { template } }`
 
-- `POST /api/drafts` - Create a new draft
+- `POST /drafts` - Create a new draft
   - **Access**: Private (JWT required)
   - **Body**: `{ title, subject, body, receivers?, template?, tags? }`
   - **Validation**: Required title/subject/body, optional arrays
   - **Security**: Verifies receiver ownership
   - **Response**: `{ success: true, data: { draft } }`
 
-- `GET /api/drafts` - Get all drafts for current user
+- `GET /drafts` - Get all drafts for current user
   - **Access**: Private (JWT required)
   - **Query Params**: `page, limit, status, category, search, sortBy, sortOrder`
   - **Features**: Filter by status/category, search, pagination, sorting
   - **Response**: `{ success: true, data: { drafts, pagination } }`
 
-- `GET /api/drafts/stats` - Get draft statistics
+- `GET /drafts/stats` - Get draft statistics
   - **Access**: Private (JWT required)
   - **Response**: `{ success: true, data: { totalDrafts, draftsByStatus, draftsByCategory, recentDrafts } }`
 
-- `GET /api/drafts/:id` - Get single draft by ID
+- `GET /drafts/:id` - Get single draft by ID
   - **Access**: Private (JWT required, ownership verified)
   - **Response**: `{ success: true, data: { draft } }`
 
-- `PUT /api/drafts/:id` - Update a draft
+- `PUT /drafts/:id` - Update a draft
   - **Access**: Private (JWT required, ownership verified)
   - **Body**: `{ title, subject, body, receivers?, template?, tags? }`
   - **Security**: Verifies receiver ownership
   - **Response**: `{ success: true, data: { draft } }`
 
-- `DELETE /api/drafts/:id` - Delete a draft
+- `DELETE /drafts/:id` - Delete a draft
   - **Access**: Private (JWT required, ownership verified)
   - **Response**: `{ success: true, message: "Draft deleted successfully" }`
 
-- `POST /api/drafts/:id/duplicate` - Duplicate a draft
+- `POST /drafts/:id/duplicate` - Duplicate a draft
   - **Access**: Private (JWT required, ownership verified)
   - **Response**: `{ success: true, data: { draft } }`
 

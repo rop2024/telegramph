@@ -48,7 +48,7 @@ const draftValidation = [
     .withMessage('Tags must be an array')
 ];
 
-// @route   GET /api/drafts/templates
+// @route   GET /drafts/templates
 // @desc    Get all available email templates
 // @access  Private
 router.get('/templates', authMiddleware, (req, res) => {
@@ -68,7 +68,7 @@ router.get('/templates', authMiddleware, (req, res) => {
   }
 });
 
-// @route   GET /api/drafts/templates/:id
+// @route   GET /drafts/templates/:id
 // @desc    Get specific template by ID
 // @access  Private
 router.get('/templates/:id', authMiddleware, (req, res) => {
@@ -97,7 +97,7 @@ router.get('/templates/:id', authMiddleware, (req, res) => {
   }
 });
 
-// @route   POST /api/drafts
+// @route   POST /drafts
 // @desc    Create a new draft
 // @access  Private
 router.post('/', authMiddleware, draftValidation, async (req, res) => {
@@ -166,7 +166,7 @@ router.post('/', authMiddleware, draftValidation, async (req, res) => {
   }
 });
 
-// @route   GET /api/drafts
+// @route   GET /drafts
 // @desc    Get all drafts for current user
 // @access  Private
 router.get('/', authMiddleware, async (req, res) => {
@@ -243,7 +243,7 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// @route   GET /api/drafts/stats
+// @route   GET /drafts/stats
 // @desc    Get draft statistics for current user
 // @access  Private
 router.get('/stats', authMiddleware, async (req, res) => {
@@ -263,7 +263,7 @@ router.get('/stats', authMiddleware, async (req, res) => {
   }
 });
 
-// @route   GET /api/drafts/:id
+// @route   GET /drafts/:id
 // @desc    Get single draft by ID
 // @access  Private
 router.get('/:id', authMiddleware, async (req, res) => {
@@ -296,7 +296,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// @route   PUT /api/drafts/:id
+// @route   PUT /drafts/:id
 // @desc    Update a draft
 // @access  Private
 router.put('/:id', authMiddleware, draftValidation, async (req, res) => {
@@ -373,7 +373,7 @@ router.put('/:id', authMiddleware, draftValidation, async (req, res) => {
   }
 });
 
-// @route   DELETE /api/drafts/:id
+// @route   DELETE /drafts/:id
 // @desc    Delete a draft
 // @access  Private
 router.delete('/:id', authMiddleware, async (req, res) => {
@@ -404,7 +404,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// @route   POST /api/drafts/:id/duplicate
+// @route   POST /drafts/:id/duplicate
 // @desc    Duplicate a draft
 // @access  Private
 router.post('/:id/duplicate', authMiddleware, async (req, res) => {

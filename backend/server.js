@@ -20,7 +20,7 @@ app.use('/auth', require('./routes/auth'));
 app.use('/protected', require('./routes/protected'));
 app.use('/', require('./routes/test'));
 app.use('/receivers', require('./routes/receivers'));
-app.use('/api/drafts', require('./routes/drafts'));
+app.use('/drafts', require('./routes/drafts'));
 
 
 // MongoDB Connection

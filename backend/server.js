@@ -9,10 +9,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 // routes
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/protected', require('./routes/protected'));
-app.use('/api', require('./routes/test'));
+app.use('/auth', require('./routes/auth'));
+app.use('/protected', require('./routes/protected'));
+app.use('/', require('./routes/test'));
+app.use('/receivers', require('./routes/receivers'));
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI, {
@@ -23,7 +30,7 @@ mongoose.connect(process.env.MONGODB_URI, {
 .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
 // Basic health check route
-app.get('/api/health', (req, res) => {
+app.get('/health', (req, res) => {
   res.json({ 
     status: 'Server is running!', 
     timestamp: new Date().toISOString() 
@@ -31,7 +38,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Test route
-app.get('/api/test', (req, res) => {
+app.get('/test', (req, res) => {
   res.json({ message: 'Backend is working!' });
 });
 

@@ -8,6 +8,7 @@ const Dashboard = () => {
   const [user, setUser] = useState(null);
   const [protectedData, setProtectedData] = useState('');
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -53,28 +54,61 @@ const Dashboard = () => {
       </header>
 
       <div className="dashboard-content">
-        <div className="user-card">
-          <h3>User Information</h3>
-          <p><strong>Username:</strong> {user.username}</p>
-          <p><strong>Email:</strong> {user.email}</p>
-          <p><strong>Role:</strong> {user.role}</p>
+        <div className="dashboard-tabs">
+          <button 
+            className={`tab-button ${activeTab === 'overview' ? 'active' : ''}`}
+            onClick={() => setActiveTab('overview')}
+          >
+            Overview
+          </button>
+          <button 
+            className={`tab-button ${activeTab === 'receivers' ? 'active' : ''}`}
+            onClick={() => setActiveTab('receivers')}
+          >
+            Receiver Management
+          </button>
         </div>
 
-        <div className="protected-test">
-          <h3>Protected Route Test</h3>
-          <button 
-            onClick={testProtectedRoute} 
-            className="btn btn-primary"
-            disabled={loading}
-          >
-            {loading ? 'Testing...' : 'Test Protected Route'}
-          </button>
-          {protectedData && (
-            <div className="test-result">
-              <p>{protectedData}</p>
+        {activeTab === 'overview' && (
+          <div className="tab-content">
+            <div className="user-card">
+              <h3>User Information</h3>
+              <p><strong>Username:</strong> {user.username}</p>
+              <p><strong>Email:</strong> {user.email}</p>
+              <p><strong>Role:</strong> {user.role}</p>
             </div>
-          )}
-        </div>
+
+            <div className="protected-test">
+              <h3>Protected Route Test</h3>
+              <button 
+                onClick={testProtectedRoute} 
+                className="btn btn-primary"
+                disabled={loading}
+              >
+                {loading ? 'Testing...' : 'Test Protected Route'}
+              </button>
+              {protectedData && (
+                <div className="test-result">
+                  <p>{protectedData}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'receivers' && (
+          <div className="tab-content">
+            {/* ReceiverManager will be imported and used here */}
+            <p>Receiver management interface will be implemented in the next step.</p>
+            <p>This will include:</p>
+            <ul>
+              <li>Add new receivers with encrypted email storage</li>
+              <li>View and manage your receiver list</li>
+              <li>Edit and delete receivers</li>
+              <li>Search and filter functionality</li>
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );

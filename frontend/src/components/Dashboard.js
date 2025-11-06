@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import API from '../utils/api';
 import AuthService from '../utils/auth';
 import ReceiverManager from './receivers/ReceiverManager';
+import DraftManager from './drafts/DraftManager';
 import './Dashboard.css';
 
 const Dashboard = () => {
@@ -78,6 +79,13 @@ const Dashboard = () => {
           >
             <span className="nav-icon">👥</span>
             Receiver Management
+          </button>
+          <button 
+            className={`nav-button ${activeTab === 'drafts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('drafts')}
+          >
+            <span className="nav-icon">📝</span>
+            Email Drafts
           </button>
         </div>
       </nav>
@@ -157,6 +165,12 @@ const Dashboard = () => {
                     >
                       👥 Manage Receivers
                     </button>
+                    <button 
+                      onClick={() => setActiveTab('drafts')}
+                      className="btn btn-primary"
+                    >
+                      📝 Create Draft
+                    </button>
                     <button className="btn btn-outline">
                       📧 Compose Email
                     </button>
@@ -183,6 +197,12 @@ const Dashboard = () => {
           {activeTab === 'receivers' && (
             <div className="tab-content">
               <ReceiverManager />
+            </div>
+          )}
+
+          {activeTab === 'drafts' && (
+            <div className="tab-content">
+              <DraftManager />
             </div>
           )}
         </div>

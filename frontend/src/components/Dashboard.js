@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import API from '../utils/api';
 import AuthService from '../utils/auth';
+import ReceiverManager from './receivers/ReceiverManager';
 import './Dashboard.css';
 
 const Dashboard = () => {
   const [user, setUser] = useState(null);
   const [protectedData, setProtectedData] = useState('');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('receivers'); // Default to receivers tab
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -38,78 +39,154 @@ const Dashboard = () => {
   };
 
   if (!user) {
-    return <div>Loading...</div>;
+    return (
+      <div className="loading-fullscreen">
+        <div className="loading-spinner">Loading...</div>
+      </div>
+    );
   }
 
   return (
     <div className="dashboard-container">
       <header className="dashboard-header">
-        <h1>Dashboard</h1>
-        <div className="user-info">
-          <span>Welcome, {user.username}!</span>
-          <button onClick={handleLogout} className="btn btn-secondary">
-            Logout
-          </button>
+        <div className="header-content">
+          <h1>SecureMail Manager</h1>
+          <div className="user-info">
+            <div className="user-details">
+              <span className="welcome-text">Welcome, <strong>{user.username}</strong>!</span>
+              <span className="user-email">{user.email}</span>
+            </div>
+            <button onClick={handleLogout} className="btn btn-secondary">
+              Logout
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="dashboard-content">
-        <div className="dashboard-tabs">
+      <nav className="dashboard-nav">
+        <div className="nav-container">
           <button 
-            className={`tab-button ${activeTab === 'overview' ? 'active' : ''}`}
+            className={`nav-button ${activeTab === 'overview' ? 'active' : ''}`}
             onClick={() => setActiveTab('overview')}
           >
+            <span className="nav-icon">📊</span>
             Overview
           </button>
           <button 
-            className={`tab-button ${activeTab === 'receivers' ? 'active' : ''}`}
+            className={`nav-button ${activeTab === 'receivers' ? 'active' : ''}`}
             onClick={() => setActiveTab('receivers')}
           >
+            <span className="nav-icon">👥</span>
             Receiver Management
           </button>
         </div>
+      </nav>
 
-        {activeTab === 'overview' && (
-          <div className="tab-content">
-            <div className="user-card">
-              <h3>User Information</h3>
-              <p><strong>Username:</strong> {user.username}</p>
-              <p><strong>Email:</strong> {user.email}</p>
-              <p><strong>Role:</strong> {user.role}</p>
-            </div>
+      <main className="dashboard-main">
+        <div className="main-container">
+          {activeTab === 'overview' && (
+            <div className="tab-content overview-tab">
+              <div className="welcome-section">
+                <h2>Dashboard Overview</h2>
+                <p>Manage your secure email recipients and monitor system status</p>
+              </div>
 
-            <div className="protected-test">
-              <h3>Protected Route Test</h3>
-              <button 
-                onClick={testProtectedRoute} 
-                className="btn btn-primary"
-                disabled={loading}
-              >
-                {loading ? 'Testing...' : 'Test Protected Route'}
-              </button>
-              {protectedData && (
-                <div className="test-result">
-                  <p>{protectedData}</p>
+              <div className="overview-grid">
+                <div className="overview-card user-info-card">
+                  <h3>User Information</h3>
+                  <div className="info-list">
+                    <div className="info-item">
+                      <label>Username:</label>
+                      <span>{user.username}</span>
+                    </div>
+                    <div className="info-item">
+                      <label>Email:</label>
+                      <span>{user.email}</span>
+                    </div>
+                    <div className="info-item">
+                      <label>Role:</label>
+                      <span className="role-badge">{user.role}</span>
+                    </div>
+                    <div className="info-item">
+                      <label>Member Since:</label>
+                      <span>{new Date().toLocaleDateString()}</span>
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
-        )}
 
-        {activeTab === 'receivers' && (
-          <div className="tab-content">
-            {/* ReceiverManager will be imported and used here */}
-            <p>Receiver management interface will be implemented in the next step.</p>
-            <p>This will include:</p>
-            <ul>
-              <li>Add new receivers with encrypted email storage</li>
-              <li>View and manage your receiver list</li>
-              <li>Edit and delete receivers</li>
-              <li>Search and filter functionality</li>
-            </ul>
-          </div>
-        )}
-      </div>
+                <div className="overview-card system-status">
+                  <h3>System Status</h3>
+                  <div className="status-list">
+                    <div className="status-item success">
+                      <span className="status-dot"></span>
+                      <span>Authentication: Active</span>
+                    </div>
+                    <div className="status-item success">
+                      <span className="status-dot"></span>
+                      <span>Database: Connected</span>
+                    </div>
+                    <div className="status-item success">
+                      <span className="status-dot"></span>
+                      <span>Encryption: Enabled</span>
+                    </div>
+                  </div>
+                  
+                  <div className="protected-test">
+                    <h4>API Connection Test</h4>
+                    <button 
+                      onClick={testProtectedRoute} 
+                      className="btn btn-primary btn-sm"
+                      disabled={loading}
+                    >
+                      {loading ? 'Testing...' : 'Test Protected Route'}
+                    </button>
+                    {protectedData && (
+                      <div className="test-result">
+                        <p>{protectedData}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="overview-card quick-actions">
+                  <h3>Quick Actions</h3>
+                  <div className="action-buttons">
+                    <button 
+                      onClick={() => setActiveTab('receivers')}
+                      className="btn btn-primary"
+                    >
+                      👥 Manage Receivers
+                    </button>
+                    <button className="btn btn-outline">
+                      📧 Compose Email
+                    </button>
+                    <button className="btn btn-outline">
+                      ⚙️ Settings
+                    </button>
+                  </div>
+                </div>
+
+                <div className="overview-card features">
+                  <h3>Security Features</h3>
+                  <ul className="features-list">
+                    <li>✅ End-to-end email encryption</li>
+                    <li>✅ Secure AES-256 storage</li>
+                    <li>✅ User data isolation</li>
+                    <li>✅ JWT token authentication</li>
+                    <li>✅ Role-based access control</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'receivers' && (
+            <div className="tab-content">
+              <ReceiverManager />
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 };

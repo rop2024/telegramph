@@ -196,6 +196,16 @@
   font-style: italic;
 }
 
+/* Button Styles */
+.btn-success {
+  background: #38a169;
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #2f855a;
+}
+
 /* Responsive Design */
 @media (max-width: 640px) {
   .draft-header {

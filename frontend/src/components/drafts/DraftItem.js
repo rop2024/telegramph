@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import API from '../../utils/api';
+import DraftSendPanel from './DraftSendPanel';
 import './DraftItem.css';
 
-const DraftItem = ({ draft, onEditDraft, onDraftDeleted }) => {
+const DraftItem = ({ draft, onEditDraft, onDraftDeleted, onDraftSent }) => {
   const [deleting, setDeleting] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [showSendPanel, setShowSendPanel] = useState(false);
 
   const handleDelete = async () => {
     if (!window.confirm('Are you sure you want to delete this draft? This action cannot be undone.')) {
@@ -34,6 +36,17 @@ const DraftItem = ({ draft, onEditDraft, onDraftDeleted }) => {
       alert('Failed to duplicate draft. Please try again.');
     } finally {
       setDuplicating(false);
+    }
+  };
+
+  const handleSendClick = () => {
+    setShowSendPanel(true);
+  };
+
+  const handleSendComplete = (result) => {
+    setShowSendPanel(false);
+    if (onDraftSent) {
+      onDraftSent(draft._id, result);
     }
   };
 
@@ -68,7 +81,8 @@ const DraftItem = ({ draft, onEditDraft, onDraftDeleted }) => {
   };
 
   return (
-    <div className="draft-item">
+    <>
+      <div className="draft-item">
       <div className="draft-header">
         <div className="draft-meta">
           <span className="draft-id">#{draft.draftId}</span>
@@ -80,6 +94,13 @@ const DraftItem = ({ draft, onEditDraft, onDraftDeleted }) => {
           </span>
         </div>
         <div className="draft-actions">
+          <button 
+            onClick={handleSendClick}
+            className="btn btn-icon btn-success"
+            title="Send draft"
+          >
+            📤
+          </button>
           <button 
             onClick={() => onEditDraft(draft)}
             className="btn btn-icon"
@@ -150,6 +171,15 @@ const DraftItem = ({ draft, onEditDraft, onDraftDeleted }) => {
         </div>
       </div>
     </div>
+
+    {showSendPanel && (
+      <DraftSendPanel
+        draft={draft}
+        onSendComplete={handleSendComplete}
+        onClose={() => setShowSendPanel(false)}
+      />
+    )}
+    </>
   );
 };
 

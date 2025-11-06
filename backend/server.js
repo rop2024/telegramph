@@ -21,6 +21,8 @@ app.use('/protected', require('./routes/protected'));
 app.use('/', require('./routes/test'));
 app.use('/receivers', require('./routes/receivers'));
 app.use('/drafts', require('./routes/drafts'));
+app.use('/api/mail', require('./routes/mail'));
+
 
 
 // MongoDB Connection

@@ -20,9 +20,11 @@
     "express-validator": "^7.3.0",
     "firebase-admin": "^13.5.0",
     "firebase-functions": "^6.6.0",
+    "googleapis": "^164.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.19.2",
-    "mongoose-sequence": "^6.0.1"
+    "mongoose-sequence": "^6.0.1",
+    "nodemailer": "^7.0.10"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

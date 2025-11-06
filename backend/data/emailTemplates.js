@@ -159,7 +159,7 @@ const emailTemplates = [
     id: 'personal-invitation',
     name: 'Personal Invitation',
     category: 'personal',
-    subject: 'You're Invited! {{eventName}}',
+    subject: "You're Invited! {{eventName}}",
     body: `<!DOCTYPE html>
 <html>
 <head>

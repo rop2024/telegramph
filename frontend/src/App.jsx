@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import Receivers from './pages/Receivers';
 import Drafts from './pages/Drafts';
 import Logs from './pages/Logs';
+import SendMail from './pages/SendMail';
 
 function App() {
   return (
@@ -34,6 +35,13 @@ function App() {
             <ProtectedRoute>
               <Layout>
                 <Drafts />
+              </Layout>
+            </ProtectedRoute>
+          } />
+          <Route path="/send" element={
+            <ProtectedRoute>
+              <Layout>
+                <SendMail />
               </Layout>
             </ProtectedRoute>
           } />

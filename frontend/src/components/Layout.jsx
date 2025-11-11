@@ -8,7 +8,8 @@ import {
   FileText, 
   BarChart3, 
   LogOut,
-  ChevronDown
+  ChevronDown,
+  Send
 } from 'lucide-react';
 
 const Layout = ({ children }) => {
@@ -19,6 +20,7 @@ const Layout = ({ children }) => {
     { name: 'Dashboard', href: '/', icon: BarChart3 },
     { name: 'Receivers', href: '/receivers', icon: Users },
     { name: 'Drafts', href: '/drafts', icon: FileText },
+    { name: 'Send Mail', href: '/send', icon: Send },
     { name: 'Email Logs', href: '/logs', icon: Mail },
   ];
 

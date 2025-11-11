@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "telegraph-backend",
   "version": "1.0.0",
   "description": "Backend API for Telegraph (Express + MongoDB)",
@@ -12,11 +12,17 @@
   "engines": {
     "node": ">=18"
   },
-  "keywords": ["telegraph","email","backend","express","mongodb"],
+  "keywords": [
+    "telegraph",
+    "email",
+    "backend",
+    "express",
+    "mongodb"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "bcryptjs": "^3.0.2",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
     "dotenv": "^17.2.3",

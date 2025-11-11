@@ -1,11 +1,21 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Filter, Edit, Trash2, Mail } from 'lucide-react';
+import { Plus, Search, Filter, Edit, Trash2, Mail, X } from 'lucide-react';
 import { receiversAPI } from '../services/api';
 
 const Receivers = () => {
   const [receivers, setReceivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [editingReceiver, setEditingReceiver] = useState(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    company: '',
+    department: '',
+    tags: '',
+    notes: ''
+  });
 
   useEffect(() => {
     fetchReceivers();
@@ -19,6 +29,86 @@ const Receivers = () => {
       console.error('Failed to fetch receivers:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOpenModal = (receiver = null) => {
+    if (receiver) {
+      setEditingReceiver(receiver);
+      setFormData({
+        name: receiver.name,
+        email: receiver.email,
+        company: receiver.company || '',
+        department: receiver.department || '',
+        tags: receiver.tags?.join(', ') || '',
+        notes: receiver.notes || ''
+      });
+    } else {
+      setEditingReceiver(null);
+      setFormData({
+        name: '',
+        email: '',
+        company: '',
+        department: '',
+        tags: '',
+        notes: ''
+      });
+    }
+    setShowModal(true);
+  };
+
+  const handleCloseModal = () => {
+    setShowModal(false);
+    setEditingReceiver(null);
+    setFormData({
+      name: '',
+      email: '',
+      company: '',
+      department: '',
+      tags: '',
+      notes: ''
+    });
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const dataToSend = {
+        ...formData,
+        tags: formData.tags ? formData.tags.split(',').map(tag => tag.trim()).filter(Boolean) : []
+      };
+
+      if (editingReceiver) {
+        await receiversAPI.update(editingReceiver._id, dataToSend);
+      } else {
+        await receiversAPI.create(dataToSend);
+      }
+
+      handleCloseModal();
+      fetchReceivers();
+    } catch (error) {
+      console.error('Failed to save receiver:', error);
+      alert(error.response?.data?.message || 'Failed to save receiver');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm('Are you sure you want to delete this receiver?')) {
+      try {
+        await receiversAPI.delete(id);
+        fetchReceivers();
+      } catch (error) {
+        console.error('Failed to delete receiver:', error);
+        alert('Failed to delete receiver');
+      }
     }
   };
 
@@ -45,7 +135,7 @@ const Receivers = () => {
             Manage your email recipients and their information.
           </p>
         </div>
-        <button className="btn btn-primary flex items-center">
+        <button onClick={() => handleOpenModal()} className="btn btn-primary flex items-center">
           <Plus className="h-4 w-4 mr-2" />
           Add Receiver
         </button>
@@ -137,10 +227,18 @@ const Receivers = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex justify-end space-x-2">
-                      <button className="text-primary-600 hover:text-primary-900 p-1">
+                      <button 
+                        onClick={() => handleOpenModal(receiver)}
+                        className="text-primary-600 hover:text-primary-900 p-1"
+                        title="Edit"
+                      >
                         <Edit className="h-4 w-4" />
                       </button>
-                      <button className="text-red-600 hover:text-red-900 p-1">
+                      <button 
+                        onClick={() => handleDelete(receiver._id)}
+                        className="text-red-600 hover:text-red-900 p-1"
+                        title="Delete"
+                      >
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
@@ -159,7 +257,7 @@ const Receivers = () => {
               Get started by creating a new receiver.
             </p>
             <div className="mt-6">
-              <button className="btn btn-primary">
+              <button onClick={() => handleOpenModal()} className="btn btn-primary inline-flex items-center">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Receiver
               </button>
@@ -167,6 +265,134 @@ const Receivers = () => {
           </div>
         )}
       </div>
+
+      {/* Add/Edit Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+              <h2 className="text-xl font-bold text-gray-900">
+                {editingReceiver ? 'Edit Receiver' : 'Add New Receiver'}
+              </h2>
+              <button
+                onClick={handleCloseModal}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={formData.name}
+                    onChange={handleInputChange}
+                    required
+                    className="input"
+                    placeholder="John Doe"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Email <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    name="email"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    required
+                    className="input"
+                    placeholder="john@example.com"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Company
+                  </label>
+                  <input
+                    type="text"
+                    name="company"
+                    value={formData.company}
+                    onChange={handleInputChange}
+                    className="input"
+                    placeholder="Acme Inc."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Department
+                  </label>
+                  <input
+                    type="text"
+                    name="department"
+                    value={formData.department}
+                    onChange={handleInputChange}
+                    className="input"
+                    placeholder="Marketing"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tags
+                </label>
+                <input
+                  type="text"
+                  name="tags"
+                  value={formData.tags}
+                  onChange={handleInputChange}
+                  className="input"
+                  placeholder="client, vip, partner (comma separated)"
+                />
+                <p className="mt-1 text-sm text-gray-500">
+                  Separate tags with commas
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notes
+                </label>
+                <textarea
+                  name="notes"
+                  value={formData.notes}
+                  onChange={handleInputChange}
+                  rows="3"
+                  className="input"
+                  placeholder="Additional notes about this receiver..."
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4 border-t">
+                <button
+                  type="button"
+                  onClick={handleCloseModal}
+                  className="btn btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                >
+                  {editingReceiver ? 'Update' : 'Create'} Receiver
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

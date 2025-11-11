@@ -1,34 +1,611 @@
 const express = require('express');
 const { protect } = require('../middleware/auth');
+const Draft = require('../models/Draft');
+const Receiver = require('../models/Receiver');
+const MailLog = require('../models/MailLog');
+const emailService = require('../utils/emailService');
+const { decryptAES } = require('../utils/crypto');
+
 const router = express.Router();
 
-// Placeholder routes - will be implemented in Phase 3
-router.post('/send', protect, (req, res) => {
-  res.status(501).json({
-    success: false,
-    message: 'Send email endpoint - to be implemented'
-  });
+// @desc    Send test email
+// @route   POST /api/mail/send-test
+// @access  Private
+router.post('/send-test', protect, async (req, res) => {
+  try {
+    const { to, subject, body } = req.body;
+
+    if (!to || !subject || !body) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide recipient email, subject, and body'
+      });
+    }
+
+    const mailOptions = {
+      from: `"Telegraph" <${process.env.EMAIL_USER}>`,
+      to: to,
+      subject: subject,
+      text: body.replace(/<[^>]*>/g, ''), // Plain text version
+      html: body // HTML version
+    };
+
+    const result = await emailService.sendEmail(mailOptions);
+
+    res.status(200).json({
+      success: true,
+      message: 'Test email sent successfully',
+      data: result
+    });
+  } catch (error) {
+    console.error('Send test email error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error sending test email',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 });
 
-router.post('/send-bulk', protect, (req, res) => {
-  res.status(501).json({
-    success: false,
-    message: 'Send bulk emails endpoint - to be implemented'
-  });
+// @desc    Send email to single receiver
+// @route   POST /api/mail/send
+// @access  Private
+router.post('/send', protect, async (req, res) => {
+  try {
+    const { draftId, receiverId } = req.body;
+
+    if (!draftId || !receiverId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide draft ID and receiver ID'
+      });
+    }
+
+    // Get draft and verify ownership
+    const draft = await Draft.findOne({
+      _id: draftId,
+      user: req.user.id
+    }).populate('receivers', 'name email company');
+
+    if (!draft) {
+      return res.status(404).json({
+        success: false,
+        message: 'Draft not found'
+      });
+    }
+
+    // Get receiver and verify ownership
+    const receiver = await Receiver.findOne({
+      _id: receiverId,
+      user: req.user.id
+    });
+
+    if (!receiver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Receiver not found'
+      });
+    }
+
+    // Decrypt receiver email
+    const decryptedEmail = receiver.decryptedEmail;
+
+    // Create mail log entry
+    const mailLog = await MailLog.create({
+      user: req.user.id,
+      draft: draftId,
+      receiver: receiverId,
+      receiverEmail: decryptedEmail,
+      receiverName: receiver.name,
+      subject: draft.subject,
+      body: draft.body,
+      status: 'pending',
+      metadata: {
+        campaignId: `campaign-${draftId}-${Date.now()}`,
+        draftTitle: draft.title
+      }
+    });
+
+    // Process body with tracking
+    const processedBody = emailService.processBodyWithTracking(
+      draft.body, 
+      mailLog.trackingId
+    );
+
+    // Prepare email
+    const mailOptions = {
+      from: `"${req.user.name}" <${process.env.EMAIL_USER}>`,
+      to: `"${receiver.name}" <${decryptedEmail}>`,
+      subject: draft.subject,
+      text: processedBody.replace(/<[^>]*>/g, ''), // Plain text version
+      html: processedBody, // HTML version with tracking
+      headers: {
+        'X-Tracking-ID': mailLog.trackingId,
+        'X-Campaign-ID': mailLog.metadata.get('campaignId')
+      }
+    };
+
+    // Add CC if present
+    if (draft.cc && draft.cc.length > 0) {
+      mailOptions.cc = draft.cc.join(', ');
+    }
+
+    // Add BCC if present
+    if (draft.bcc && draft.bcc.length > 0) {
+      mailOptions.bcc = draft.bcc.join(', ');
+    }
+
+    // Send email
+    const result = await emailService.sendEmail(mailOptions, mailLog._id);
+
+    // Update draft status if this is the first email being sent
+    if (draft.status === 'draft') {
+      await Draft.findByIdAndUpdate(draftId, { status: 'sent' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Email sent successfully',
+      data: {
+        mailLog: mailLog._id,
+        trackingId: mailLog.trackingId,
+        ...result
+      }
+    });
+  } catch (error) {
+    console.error('Send email error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error sending email',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 });
 
-router.get('/logs', protect, (req, res) => {
-  res.status(501).json({
-    success: false,
-    message: 'Get email logs endpoint - to be implemented'
-  });
+// @desc    Send bulk emails
+// @route   POST /api/mail/send-bulk
+// @access  Private
+router.post('/send-bulk', protect, async (req, res) => {
+  try {
+    const { draftId, receiverIds, batchDelay = 1000 } = req.body;
+
+    if (!draftId || !receiverIds || !Array.isArray(receiverIds)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide draft ID and an array of receiver IDs'
+      });
+    }
+
+    // Limit batch size
+    const maxBatchSize = process.env.MAX_RECEIVERS_PER_BATCH || 50;
+    const limitedReceiverIds = receiverIds.slice(0, maxBatchSize);
+
+    // Get draft and verify ownership
+    const draft = await Draft.findOne({
+      _id: draftId,
+      user: req.user.id
+    });
+
+    if (!draft) {
+      return res.status(404).json({
+        success: false,
+        message: 'Draft not found'
+      });
+    }
+
+    // Get receivers and verify ownership
+    const receivers = await Receiver.find({
+      _id: { $in: limitedReceiverIds },
+      user: req.user.id
+    });
+
+    if (receivers.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No valid receivers found'
+      });
+    }
+
+    // Create mail log entries and prepare emails
+    const emails = [];
+    const mailLogs = [];
+
+    for (const receiver of receivers) {
+      // Decrypt receiver email
+      const decryptedEmail = receiver.decryptedEmail;
+
+      // Create mail log entry
+      const mailLog = new MailLog({
+        user: req.user.id,
+        draft: draftId,
+        receiver: receiver._id,
+        receiverEmail: decryptedEmail,
+        receiverName: receiver.name,
+        subject: draft.subject,
+        body: draft.body,
+        status: 'pending',
+        metadata: {
+          campaignId: `bulk-${draftId}-${Date.now()}`,
+          draftTitle: draft.title,
+          batchIndex: emails.length
+        }
+      });
+
+      await mailLog.save();
+      mailLogs.push(mailLog);
+
+      // Process body with tracking
+      const processedBody = emailService.processBodyWithTracking(
+        draft.body, 
+        mailLog.trackingId
+      );
+
+      // Prepare email
+      const mailOptions = {
+        from: `"${req.user.name}" <${process.env.EMAIL_USER}>`,
+        to: `"${receiver.name}" <${decryptedEmail}>`,
+        subject: draft.subject,
+        text: processedBody.replace(/<[^>]*>/g, ''),
+        html: processedBody,
+        headers: {
+          'X-Tracking-ID': mailLog.trackingId,
+          'X-Campaign-ID': mailLog.metadata.get('campaignId')
+        }
+      };
+
+      // Add CC if present
+      if (draft.cc && draft.cc.length > 0) {
+        mailOptions.cc = draft.cc.join(', ');
+      }
+
+      // Add BCC if present
+      if (draft.bcc && draft.bcc.length > 0) {
+        mailOptions.bcc = draft.bcc.join(', ');
+      }
+
+      emails.push({
+        mailOptions,
+        mailLogId: mailLog._id
+      });
+    }
+
+    // Send bulk emails
+    const results = await emailService.sendBulkEmails(emails, batchDelay);
+
+    // Update draft status
+    await Draft.findByIdAndUpdate(draftId, { status: 'sent' });
+
+    res.status(200).json({
+      success: true,
+      message: `Bulk email sending completed. ${results.successful} sent, ${results.failed} failed.`,
+      data: {
+        total: results.total,
+        successful: results.successful,
+        failed: results.failed,
+        campaignId: `bulk-${draftId}-${Date.now()}`,
+        details: results.details
+      }
+    });
+  } catch (error) {
+    console.error('Send bulk email error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error sending bulk emails',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 });
 
-router.get('/analytics', protect, (req, res) => {
-  res.status(501).json({
-    success: false,
-    message: 'Get email analytics endpoint - to be implemented'
-  });
+// @desc    Track email opens (pixel tracking)
+// @route   GET /api/mail/track/:trackingId/pixel.gif
+// @access  Public
+router.get('/track/:trackingId/pixel.gif', async (req, res) => {
+  try {
+    const { trackingId } = req.params;
+
+    const mailLog = await MailLog.findOne({ trackingId });
+    
+    if (mailLog) {
+      // Record the open
+      await mailLog.recordOpen();
+      
+      console.log(`📨 Email opened: ${mailLog.receiverEmail} (${trackingId})`);
+    }
+
+    // Return a 1x1 transparent GIF
+    const pixel = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+    
+    res.writeHead(200, {
+      'Content-Type': 'image/gif',
+      'Content-Length': pixel.length,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
+    res.end(pixel);
+  } catch (error) {
+    console.error('Pixel tracking error:', error);
+    // Still return the pixel even if tracking fails
+    const pixel = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+    res.type('gif').send(pixel);
+  }
+});
+
+// @desc    Track link clicks
+// @route   GET /api/mail/track/:trackingId/click
+// @access  Public
+router.get('/track/:trackingId/click', async (req, res) => {
+  try {
+    const { trackingId } = req.params;
+    const { url, link } = req.query;
+
+    if (!url) {
+      return res.status(400).send('Missing URL parameter');
+    }
+
+    const mailLog = await MailLog.findOne({ trackingId });
+    
+    if (mailLog) {
+      // Record the click
+      await mailLog.recordClick();
+      
+      console.log(`🔗 Link clicked: ${mailLog.receiverEmail} -> ${url} (${trackingId})`);
+    }
+
+    // Redirect to the original URL
+    res.redirect(url);
+  } catch (error) {
+    console.error('Click tracking error:', error);
+    // Still redirect even if tracking fails
+    if (req.query.url) {
+      res.redirect(req.query.url);
+    } else {
+      res.status(400).send('Invalid tracking request');
+    }
+  }
+});
+
+// @desc    Get email logs
+// @route   GET /api/mail/logs
+// @access  Private
+router.get('/logs', protect, async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      status,
+      draftId,
+      receiverEmail,
+      startDate,
+      endDate,
+      sortBy = 'sentAt',
+      sortOrder = 'desc'
+    } = req.query;
+
+    // Build query object
+    const query = { user: req.user.id };
+    
+    // Filter by status
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    // Filter by draft
+    if (draftId) {
+      query.draft = draftId;
+    }
+
+    // Filter by receiver email
+    if (receiverEmail) {
+      query.receiverEmail = { $regex: receiverEmail, $options: 'i' };
+    }
+
+    // Filter by date range
+    if (startDate || endDate) {
+      query.sentAt = {};
+      if (startDate) query.sentAt.$gte = new Date(startDate);
+      if (endDate) query.sentAt.$lte = new Date(endDate);
+    }
+
+    // Sort configuration
+    const sortConfig = {};
+    sortConfig[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+    // Execute query with pagination
+    const logs = await MailLog.find(query)
+      .populate('draft', 'title subject')
+      .populate('receiver', 'name company')
+      .sort(sortConfig)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .lean();
+
+    // Get total count for pagination
+    const total = await MailLog.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      count: logs ? logs.length : 0,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      },
+      data: logs || []
+    });
+  } catch (error) {
+    console.error('Get mail logs error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error retrieving mail logs',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @desc    Get email analytics
+// @route   GET /api/mail/analytics
+// @access  Private
+router.get('/analytics', protect, async (req, res) => {
+  try {
+    const { period = '7d' } = req.query;
+    
+    // Calculate date range based on period
+    const endDate = new Date();
+    const startDate = new Date();
+    
+    switch (period) {
+      case '24h':
+        startDate.setDate(startDate.getDate() - 1);
+        break;
+      case '7d':
+        startDate.setDate(startDate.getDate() - 7);
+        break;
+      case '30d':
+        startDate.setDate(startDate.getDate() - 30);
+        break;
+      case '90d':
+        startDate.setDate(startDate.getDate() - 90);
+        break;
+      default:
+        startDate.setDate(startDate.getDate() - 7);
+    }
+
+    // Get sending statistics
+    const stats = await MailLog.getSendingStats(req.user.id, startDate, endDate);
+    
+    // Format stats
+    const formattedStats = {
+      sent: 0,
+      delivered: 0,
+      opened: 0,
+      clicked: 0,
+      failed: 0,
+      totalOpens: 0,
+      totalClicks: 0
+    };
+
+    if (stats && Array.isArray(stats)) {
+      stats.forEach(stat => {
+        formattedStats[stat._id] = stat.count;
+        formattedStats.totalOpens += stat.totalOpens || 0;
+        formattedStats.totalClicks += stat.totalClicks || 0;
+      });
+    }
+
+    // Calculate rates
+    const totalSent = formattedStats.sent + formattedStats.delivered + formattedStats.opened + formattedStats.clicked;
+    formattedStats.deliveryRate = totalSent > 0 ? (formattedStats.delivered / totalSent * 100).toFixed(2) : 0;
+    formattedStats.openRate = totalSent > 0 ? (formattedStats.opened / totalSent * 100).toFixed(2) : 0;
+    formattedStats.clickRate = totalSent > 0 ? (formattedStats.clicked / totalSent * 100).toFixed(2) : 0;
+    formattedStats.clickToOpenRate = formattedStats.opened > 0 ? (formattedStats.clicked / formattedStats.opened * 100).toFixed(2) : 0;
+
+    // Get recent activity
+    const recentActivity = await MailLog.find({
+      user: req.user.id,
+      sentAt: { $exists: true, $gte: startDate }
+    })
+    .populate('draft', 'title')
+    .populate('receiver', 'name')
+    .sort({ sentAt: -1 })
+    .limit(10)
+    .lean();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        period: {
+          start: startDate,
+          end: endDate
+        },
+        statistics: formattedStats,
+        recentActivity
+      }
+    });
+  } catch (error) {
+    console.error('Get analytics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error retrieving analytics',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @desc    Get email service status
+// @route   GET /api/mail/status
+// @access  Private
+router.get('/status', protect, async (req, res) => {
+  try {
+    const status = emailService.getStatus();
+    
+    res.status(200).json({
+      success: true,
+      data: status
+    });
+  } catch (error) {
+    console.error('Get email status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error retrieving email service status'
+    });
+  }
+});
+
+// @desc    Retry failed email
+// @route   POST /api/mail/retry/:mailLogId
+// @access  Private
+router.post('/retry/:mailLogId', protect, async (req, res) => {
+  try {
+    const mailLog = await MailLog.findOne({
+      _id: req.params.mailLogId,
+      user: req.user.id,
+      status: 'failed'
+    }).populate('draft').populate('receiver');
+
+    if (!mailLog) {
+      return res.status(404).json({
+        success: false,
+        message: 'Failed mail log entry not found'
+      });
+    }
+
+    // Process body with tracking
+    const processedBody = emailService.processBodyWithTracking(
+      mailLog.body, 
+      mailLog.trackingId
+    );
+
+    // Prepare email
+    const mailOptions = {
+      from: `"${req.user.name}" <${process.env.EMAIL_USER}>`,
+      to: `"${mailLog.receiverName}" <${mailLog.receiverEmail}>`,
+      subject: mailLog.subject,
+      text: processedBody.replace(/<[^>]*>/g, ''),
+      html: processedBody,
+      headers: {
+        'X-Tracking-ID': mailLog.trackingId,
+        'X-Retry': 'true'
+      }
+    };
+
+    // Send email
+    const result = await emailService.sendEmail(mailOptions, mailLog._id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Email retry sent successfully',
+      data: result
+    });
+  } catch (error) {
+    console.error('Retry email error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error retrying email'
+    });
+  }
 });
 
 module.exports = router;

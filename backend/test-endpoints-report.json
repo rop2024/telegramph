@@ -1,0 +1,74 @@
+{
+  "timestamp": "2025-11-12T15:43:39.190Z",
+  "base": "http://localhost:5000",
+  "results": [
+    {
+      "path": "emailService.getStatus()",
+      "desc": "Local email service status",
+      "ok": true,
+      "body": {
+        "isConnected": false,
+        "provider": "gmail-oauth2",
+        "emailUser": "telegramph025@gmail.com",
+        "maxReceiversPerBatch": "50"
+      }
+    },
+    {
+      "path": "/api/health",
+      "desc": "Health check (public)",
+      "status": 200,
+      "ok": true,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "{\"success\":true,\"message\":\"Telegraph Backend Server is running!\",\"timestamp\":\"2025-11-12T15:43:33.887Z\",\"environment\":\"development\"}"
+    },
+    {
+      "path": "/api/db-status",
+      "desc": "DB status (public)",
+      "status": 200,
+      "ok": true,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "{\"success\":true,\"database\":{\"status\":\"connecting\",\"readyState\":2}}"
+    },
+    {
+      "path": "/api/auth/google/url",
+      "desc": "Google OAuth URL (public)",
+      "status": 200,
+      "ok": true,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "{\"success\":true,\"url\":\"https://accounts.google.com/o/oauth2/v2/auth?access_type=offline&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.send&prompt=consent&response_type=code&client_id=408572937699-jrj2rmrutjvlgu5krb758k1p6763jf6v.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A5000%2Fapi%2Fauth%2Fgoogle%2Fcallback\"}"
+    },
+    {
+      "path": "/api/mail/status",
+      "desc": "Mail service status (protected)",
+      "status": 200,
+      "ok": true,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "{\"success\":true,\"data\":{\"isConnected\":false,\"provider\":\"gmail-oauth2\",\"emailUser\":\"telegramph025@gmail.com\",\"maxReceiversPerBatch\":\"50\"}}"
+    },
+    {
+      "path": "/api/mail/send-test",
+      "desc": "Send test email (protected)",
+      "status": 500,
+      "ok": false,
+      "body": "{\"success\":false,\"message\":\"Error sending test email\",\"error\":\"Email service is not initialized\"}"
+    },
+    {
+      "path": "/api/mail/track/test-pixel/pixel.gif",
+      "desc": "Tracking pixel (public)",
+      "status": 200,
+      "ok": true,
+      "headers": {
+        "content-type": "image/gif"
+      },
+      "body": "<binary image>"
+    }
+  ]
+}

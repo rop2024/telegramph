@@ -31,10 +31,12 @@ Telegraph is a comprehensive email management system designed for creating, mana
 - **User Authentication**: JWT-based authentication with email verification and password reset
 - **Receiver Management**: CRUD operations for email recipients with tagging and categorization
 - **Draft Management**: Email draft creation with versioning, templating, and scheduling
-- **Email Sending**: Single and bulk email sending with rate limiting and retry mechanisms
+- **Gmail OAuth2 Integration**: Full Gmail API integration for sending emails and creating drafts
+- **Email Sending**: Multiple sending methods (Gmail API, SMTP) with rate limiting and retry mechanisms
+- **Gmail Draft Creation**: Create drafts directly in Gmail account's Drafts folder
 - **Email Tracking**: Open tracking (pixel), click tracking, and delivery status monitoring
 - **Analytics**: Comprehensive email performance metrics and campaign analytics
-- **Security**: AES-256-GCM encryption for sensitive data, bcrypt password hashing
+- **Security**: AES-256-GCM encryption for sensitive data, bcrypt password hashing, OAuth2 token management
 
 ### System Architecture
 ```
@@ -45,14 +47,17 @@ Telegraph is a comprehensive email management system designed for creating, mana
 │                 │         │                 │         │                 │
 └─────────────────┘         └─────────────────┘         └─────────────────┘
                                      │
-                                     │ SMTP
-                                     ▼
-                            ┌─────────────────┐
-                            │                 │
-                            │  Email Provider │
-                            │  (Ethereal/SMTP)│
-                            │                 │
-                            └─────────────────┘
+                                     │
+                         ┌───────────┴───────────┐
+                         │                       │
+                         ▼                       ▼
+                ┌─────────────────┐     ┌─────────────────┐
+                │                 │     │                 │
+                │  Gmail API      │     │  Email Provider │
+                │  (OAuth2)       │     │  (SMTP Fallback)│
+                │  - Send Email   │     │                 │
+                │  - Create Draft │     │                 │
+                └─────────────────┘     └─────────────────┘
 ```
 
 ---
@@ -74,7 +79,8 @@ Telegraph is a comprehensive email management system designed for creating, mana
 | mongoose | 8.19.2 | MongoDB object modeling |
 | jsonwebtoken | 9.0.2 | JWT authentication tokens |
 | bcryptjs | 3.0.3 | Password hashing |
-| nodemailer | 7.0.10 | Email sending service |
+| nodemailer | 7.0.10 | Email sending service (SMTP) |
+| googleapis | 164.1.0 | Google Gmail API integration |
 | express-validator | 7.3.0 | Request validation |
 | crypto-js | 4.2.0 | AES encryption utilities |
 | cors | 2.8.5 | Cross-origin resource sharing |
@@ -186,12 +192,16 @@ backend/
 │   └── MailLog.js            # Email tracking and logs schema
 ├── routes/
 │   ├── authRoutes.js         # Authentication endpoints
+│   ├── authGoogle.js         # Google OAuth consent flow
 │   ├── receiverRoutes.js     # Receiver CRUD endpoints
 │   ├── draftRoutes.js        # Draft CRUD endpoints
-│   └── mailRoutes.js         # Email sending and tracking endpoints
+│   └── mailRoutes.js         # Email sending, tracking, Gmail API endpoints
 ├── utils/
 │   ├── crypto.js             # AES-256-GCM encryption utilities
-│   └── emailService.js       # Nodemailer email service class
+│   └── emailService.js       # Gmail OAuth2 & Nodemailer service class
+├── scripts/
+│   ├── testCreateDraft.js    # Automated test for Gmail draft creation
+│   └── getRefreshToken.md    # Guide for obtaining OAuth refresh token
 ├── test-draft.js             # Draft API automated tests
 ├── test-mail.js              # Mail API automated tests
 ├── server.js                 # Express app entry point
@@ -523,6 +533,56 @@ Response: { success, message }
 
 ---
 
+### Google OAuth Routes (`/api/auth/google`)
+
+#### 7. **Get OAuth Consent URL**
+```
+GET /api/auth/google/url
+Response: { url: "https://accounts.google.com/o/oauth2/v2/auth?..." }
+```
+
+**Purpose:**
+- Generate Google OAuth2 consent URL
+- User visits URL to authorize Gmail access
+- Required scopes: gmail.send, gmail.compose, email, profile, openid
+
+**Process:**
+1. Initialize OAuth2Client with CLIENT_ID and CLIENT_SECRET
+2. Generate authorization URL with:
+   - access_type: 'offline' (for refresh token)
+   - prompt: 'consent' (force consent screen)
+   - scope: ['gmail.send', 'gmail.compose', 'email', 'profile', 'openid']
+3. Return URL to frontend
+
+#### 8. **OAuth Callback Handler**
+```
+GET /api/auth/google/callback?code=<authorization_code>
+Response: { 
+  access_token, 
+  refresh_token, 
+  scope, 
+  token_type, 
+  expiry_date 
+}
+```
+
+**Purpose:**
+- Exchange authorization code for access/refresh tokens
+- Obtain refresh token for server-side Gmail API access
+
+**Process:**
+1. Extract authorization code from query parameter
+2. Call oauth2Client.getToken(code)
+3. Return complete token response including refresh_token
+4. Store refresh_token in .env as GOOGLE_REFRESH_TOKEN
+
+**Security:**
+- Redirect URI must match Google Cloud Console configuration
+- Code is single-use and expires in 10 minutes
+- Refresh token only returned on first consent or when prompt=consent
+
+---
+
 ### Receiver Routes (`/api/receivers`)
 
 **All routes require authentication (`protect` middleware)**
@@ -793,13 +853,62 @@ Response: 302 Redirect to original URL
 ```
 POST /api/mail/send-test
 Headers: Authorization: Bearer <token>
-Body: { to, subject, body }
-Response: { success, message, data: { messageId, previewUrl } }
+Body: { to, subject, text }
+Response: { success, messageId, previewUrl }
 ```
 
 **Purpose:**
 - Quick email testing without creating draft/receiver
-- Uses default Ethereal account
+- Always requires JWT authentication
+- Uses Gmail OAuth2 or SMTP fallback
+
+**Process:**
+1. Verify JWT authentication
+2. Send email via emailService.sendMail()
+3. Return explicit messageId and previewUrl at response root level
+4. Preview URL only available in development mode
+
+##### 3.1. **Send Email via Gmail API**
+```
+POST /api/mail/send-gmail
+Headers: Authorization: Bearer <token>
+Body: { to, subject, text, html? }
+Response: { success, id, threadId, labelIds }
+```
+
+**Purpose:**
+- Send email directly through Gmail API
+- Email appears in sender's Sent folder
+- Full Gmail integration with labels
+
+**Process:**
+1. Verify JWT authentication
+2. Initialize Gmail OAuth2 client
+3. Create RFC 2822 MIME message
+4. Base64url encode message
+5. Call gmail.users.messages.send()
+6. Return Gmail message ID and labels
+
+##### 3.2. **Create Gmail Draft**
+```
+POST /api/mail/create-draft-gmail
+Headers: Authorization: Bearer <token>
+Body: { to, subject, text, html? }
+Response: { success, draftId, messageId, message }
+```
+
+**Purpose:**
+- Create draft visible in Gmail Drafts folder
+- Can be edited and sent from Gmail interface
+- Uses Gmail API for native integration
+
+**Process:**
+1. Verify JWT authentication
+2. Initialize Gmail OAuth2 client
+3. Create RFC 2822 MIME message
+4. Base64url encode message
+5. Call gmail.users.drafts.create()
+6. Return Gmail draft ID and message ID
 
 ##### 4. **Send Single Email**
 ```
@@ -925,6 +1034,23 @@ Response: { success, message, data: mailLog }
 - Attaches user to req.user
 ```
 
+#### OAuth2 Token Management (Gmail)
+```javascript
+// OAuth2 Flow:
+- Client ID and Secret from Google Cloud Console
+- Authorization code exchange for tokens
+- Refresh token stored in environment variables
+- Access token obtained automatically via refresh token
+- Token expiry handled by googleapis library
+
+// Security Considerations:
+- Refresh tokens are long-lived credentials
+- Store securely (environment variables, secrets manager)
+- Never expose in client-side code
+- Rotate if compromised
+- Scope-specific (cannot upgrade; must re-consent)
+```
+
 #### Password Security
 ```javascript
 // Hashing:
@@ -1011,7 +1137,14 @@ JWT_EXPIRE=30d
 # Encryption
 ENCRYPTION_SECRET=<strong passphrase>
 
-# Email (SMTP)
+# Gmail OAuth2 (Recommended)
+USE_GMAIL_OAUTH=true
+GOOGLE_CLIENT_ID=<from Google Cloud Console>
+GOOGLE_CLIENT_SECRET=<from Google Cloud Console>
+GOOGLE_REFRESH_TOKEN=<obtained via /api/auth/google/callback>
+GMAIL_FROM_ADDRESS=telegramph025@gmail.com
+
+# Email SMTP Fallback (Optional)
 EMAIL_HOST=smtp.ethereal.email
 EMAIL_PORT=587
 EMAIL_USER=<auto-generated>
@@ -1021,11 +1154,29 @@ EMAIL_PASS=<auto-generated>
 CLIENT_URL=http://localhost:3000
 ```
 
+**Gmail OAuth Setup:**
+1. Create project in Google Cloud Console
+2. Enable Gmail API
+3. Create OAuth2 credentials (Web Application)
+4. Add authorized redirect URI: `http://localhost:5000/api/auth/google/callback`
+5. Visit `/api/auth/google/url` to generate consent URL
+6. Authorize and copy refresh_token from callback response
+7. Set GOOGLE_REFRESH_TOKEN in .env
+
+**OAuth Scopes Required:**
+- `https://www.googleapis.com/auth/gmail.send` - Send emails
+- `https://www.googleapis.com/auth/gmail.compose` - Create/modify drafts
+- `https://www.googleapis.com/auth/userinfo.email` - User email
+- `https://www.googleapis.com/auth/userinfo.profile` - User profile
+- `openid` - OpenID Connect authentication
+
 **Security Best Practices:**
 - Never commit .env to version control
 - Use strong random secrets (>= 256 bits)
 - Rotate secrets periodically
 - Use different secrets per environment
+- Refresh tokens are long-lived; protect them like passwords
+- Re-consent required if changing OAuth scopes
 
 ### 6. **Rate Limiting & Abuse Prevention**
 
@@ -1069,14 +1220,56 @@ express.urlencoded({ limit: '10mb' })
 class EmailService {
   constructor() {
     this.transporter = null;
+    this.oauth2Client = null;
+    this.gmail = null;
   }
 
   async init() {
-    // Creates Ethereal test account if no credentials
-    // Configures nodemailer transporter
-    // Verifies SMTP connection
+    // Gmail OAuth2 Setup (Primary)
+    if (process.env.USE_GMAIL_OAUTH === 'true') {
+      1. Initialize OAuth2Client with CLIENT_ID, CLIENT_SECRET, REDIRECT_URI
+      2. Set credentials with GOOGLE_REFRESH_TOKEN
+      3. Obtain access token via oauth2Client.getAccessToken()
+      4. Create nodemailer transporter with OAuth2 configuration
+      5. Initialize Gmail API client: google.gmail({ version: 'v1', auth })
+      6. Verify SMTP connection (graceful failure handling)
+    }
+    
+    // SMTP Fallback
+    else {
+      1. Use nodemailer with standard SMTP credentials
+      2. Or create Ethereal test account in development
+      3. Verify connection
+    }
   }
 }
+```
+
+**Gmail OAuth2 Configuration:**
+```javascript
+transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    type: 'OAuth2',
+    user: process.env.GMAIL_FROM_ADDRESS,
+    clientId: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
+    accessToken: accessToken.token
+  },
+  logger: false,  // Disable verbose logs
+  debug: false    // Disable debug output
+});
+```
+
+**Logging Output:**
+```
+📧 Initializing Gmail OAuth2 transporter
+🔑 Using Gmail account: telegramph025@gmail.com
+🔐 Obtaining access token via OAuth2...
+✅ Access token obtained
+✅ Gmail OAuth2 transporter initialized successfully
+⚠️ SMTP verification failed (common with Gmail OAuth, API calls still work)
 ```
 
 #### Core Methods
@@ -1097,7 +1290,8 @@ class EmailService {
 1. Send via transporter.sendMail()
 2. Extract messageId from response
 3. Update mail log to 'sent' status
-4. Return { messageId, previewUrl }
+4. Log: "📧 Email sent successfully | From: ... | To: ... | Subject: ... | MessageID: ..."
+5. Return { messageId, previewUrl }
 
 // Error Handling:
 - Updates mail log to 'failed' on error
@@ -1167,33 +1361,89 @@ Output: <a href="http://api/track/{id}/click?url=...">Link</a>
 // Returns:
 {
   isConnected: true/false,
-  provider: 'Ethereal',
+  provider: 'Gmail OAuth2' | 'SMTP' | 'Ethereal',
   accountInfo: {
-    user: 'user@ethereal.email',
-    previewUrl: 'https://ethereal.email'
+    user: 'telegramph025@gmail.com',
+    previewUrl: 'https://ethereal.email' // Only in dev mode
   }
 }
 ```
 
-### Ethereal Email Integration
+### Gmail API Integration
 
-**Purpose:**
-- Test SMTP service (not for production)
-- Generates temporary email accounts
-- Provides web interface for viewing sent emails
+**OAuth2 Setup Process:**
+1. Visit `/api/auth/google/url` to get consent URL
+2. User authorizes with Google account
+3. Redirects to `/api/auth/google/callback?code=...`
+4. Exchange code for tokens (access_token + refresh_token)
+5. Store GOOGLE_REFRESH_TOKEN in .env
+6. Server uses refresh token to obtain access tokens automatically
+
+**Required Scopes:**
+- `https://www.googleapis.com/auth/gmail.send` - Send emails
+- `https://www.googleapis.com/auth/gmail.compose` - Create/modify drafts
+- `https://www.googleapis.com/auth/userinfo.email` - User email
+- `https://www.googleapis.com/auth/userinfo.profile` - User profile
+- `openid` - OpenID Connect authentication
+
+**Gmail API Methods:**
+
+**Create Draft:**
+```javascript
+const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+const rawMessage = [
+  `From: ${from}`,
+  `To: ${to}`,
+  `Subject: ${subject}`,
+  '',
+  text
+].join('\n');
+
+const encodedMessage = Buffer.from(rawMessage)
+  .toString('base64')
+  .replace(/\+/g, '-')
+  .replace(/\//g, '_')
+  .replace(/=+$/, '');
+
+const response = await gmail.users.drafts.create({
+  userId: 'me',
+  requestBody: {
+    message: { raw: encodedMessage }
+  }
+});
+
+// Returns: { draftId, messageId }
+```
+
+**Send Email via Gmail API:**
+```javascript
+const response = await gmail.users.messages.send({
+  userId: 'me',
+  requestBody: {
+    raw: encodedMessage
+  }
+});
+
+// Returns: { id, threadId, labelIds: ['SENT'] }
+```
+
+### Dual Email Path Strategy
+
+**Gmail API (Primary):**
+- Used for: `/send-gmail`, `/create-draft-gmail`
+- Benefits: Native Gmail integration, appears in Sent folder, draft management
+- Limitations: Requires OAuth consent, refresh token management
+
+**SMTP with OAuth2 (Fallback):**
+- Used for: `/send-test`, `/send` (bulk sends)
+- Benefits: Works with tracking pixels, traditional email workflow
+- Limitations: SMTP verification may fail (doesn't affect functionality)
+
+**Development Mode:**
+- Ethereal.email integration for testing
+- Preview URLs provided in responses
 - No actual email delivery
-
-**Account Creation:**
-```javascript
-const testAccount = await nodemailer.createTestAccount();
-// Returns: { user, pass, smtp: { host, port, secure } }
-```
-
-**Preview URLs:**
-```javascript
-const previewUrl = nodemailer.getTestMessageUrl(info);
-// Returns: https://ethereal.email/message/{messageId}
-```
 
 ---
 
@@ -1718,12 +1968,40 @@ JWT_SECRET=<256-bit production secret>
 ENCRYPTION_SECRET=<strong production passphrase>
 CLIENT_URL=https://your-domain.com
 
-# Production Email (Replace Ethereal):
+# Gmail OAuth2 (Recommended for Production):
+USE_GMAIL_OAUTH=true
+GOOGLE_CLIENT_ID=<production client ID>
+GOOGLE_CLIENT_SECRET=<production client secret>
+GOOGLE_REFRESH_TOKEN=<production refresh token>
+GMAIL_FROM_ADDRESS=noreply@your-domain.com
+
+# Production Email SMTP Fallback (Optional):
 EMAIL_HOST=smtp.sendgrid.net
 EMAIL_PORT=587
 EMAIL_USER=apikey
 EMAIL_PASS=<sendgrid-api-key>
 ```
+
+**Gmail OAuth Production Setup:**
+1. Create production project in Google Cloud Console
+2. Enable Gmail API for project
+3. Create OAuth2 credentials (Web Application)
+4. Configure authorized redirect URIs:
+   - `https://your-domain.com/api/auth/google/callback`
+   - `https://api.your-domain.com/api/auth/google/callback`
+5. Generate refresh token in production environment:
+   - Deploy backend with CLIENT_ID and CLIENT_SECRET
+   - Visit `https://api.your-domain.com/api/auth/google/url`
+   - Authorize with production Gmail account
+   - Copy refresh_token from callback response
+6. Update GOOGLE_REFRESH_TOKEN in production environment
+7. Restart application
+
+**Gmail API Considerations:**
+- Daily sending limit: 2,000 emails/day for standard Gmail
+- Consider Google Workspace for higher limits (10,000/day)
+- Monitor quota usage in Cloud Console
+- Implement retry logic for quota exceeded errors
 
 **Database:**
 - **MongoDB Atlas**: Production cluster (M10+ recommended)
@@ -1775,9 +2053,12 @@ const API = axios.create({
 - Index usage analysis
 
 #### Email Monitoring
-- **Production SMTP**: SendGrid, AWS SES, Mailgun
-- **Analytics**: Open rates, click rates, bounce rates
-- **Deliverability**: SPF, DKIM, DMARC configuration
+- **Gmail API**: Monitor quota usage in Google Cloud Console
+- **Production Limits**: 2,000 emails/day (Gmail), 10,000/day (Workspace)
+- **Analytics**: Open rates, click rates from MailLog collection
+- **Deliverability**: Ensure SPF, DKIM, DMARC configured for custom domain
+- **OAuth Token Management**: Refresh tokens are long-lived but monitor for expiration
+- **Fallback Strategy**: SMTP via SendGrid/AWS SES if Gmail API unavailable
 
 ### Scaling Strategies
 
@@ -1862,37 +2143,59 @@ Load Balancer
 
 ## Future Enhancements
 
+### Implemented Features ✅
+
+1. **Gmail OAuth2 Integration**
+   - ✅ OAuth consent flow
+   - ✅ Gmail API draft creation
+   - ✅ Gmail API direct sending
+   - ✅ Refresh token management
+   - ✅ Dual-path email sending (Gmail API + SMTP fallback)
+
 ### Planned Features
 
 1. **Email Templates**
    - Visual email builder
    - Template library
    - Variable substitution
+   - Dynamic content personalization
 
 2. **Advanced Scheduling**
    - Time zone support
    - Recurring campaigns
    - A/B testing
+   - Optimal send time prediction
 
 3. **Enhanced Analytics**
    - Heatmaps for email clicks
    - Engagement scoring
    - Predictive analytics
+   - Campaign performance comparison
 
 4. **Integration APIs**
    - Zapier integration
    - Webhook support
-   - REST API documentation (Swagger)
+   - REST API documentation (Swagger/OpenAPI)
+   - GraphQL API endpoint
 
 5. **Team Collaboration**
    - Multi-user workspaces
    - Role-based access control
    - Activity audit logs
+   - Shared draft folders
 
 6. **Mobile App**
    - React Native mobile client
    - Push notifications
    - Offline support
+   - Mobile-optimized analytics
+
+7. **Advanced Gmail Features**
+   - Gmail label management
+   - Thread conversation tracking
+   - Scheduled send via Gmail API
+   - Email signature templates
+   - Attachment support for drafts
 
 ---
 
@@ -1906,11 +2209,18 @@ npm run dev              # Start dev server with nodemon
 npm start                # Start production server
 node test-draft.js       # Run draft tests
 node test-mail.js        # Run mail tests
+node backend/scripts/testCreateDraft.js  # Test Gmail draft creation
 
 # Frontend:
 npm run dev              # Start Vite dev server
 npm run build            # Build for production
 npm run preview          # Preview production build
+
+# Gmail OAuth Setup:
+# 1. Visit: http://localhost:5000/api/auth/google/url
+# 2. Copy URL and authorize in browser
+# 3. Extract refresh_token from callback response
+# 4. Update GOOGLE_REFRESH_TOKEN in .env
 
 # Git:
 git status               # Check file changes
@@ -1929,12 +2239,18 @@ db.users.find()              # Query users
 - [ ] Node.js >= 18 installed
 - [ ] MongoDB Atlas account created
 - [ ] Database connection string obtained
+- [ ] Google Cloud Console project created
+- [ ] Gmail API enabled in Cloud Console
+- [ ] OAuth2 credentials created (Client ID & Secret)
+- [ ] Authorized redirect URI configured
 - [ ] .env files configured (backend)
+- [ ] Gmail refresh token obtained via OAuth flow
 - [ ] Dependencies installed (npm install)
 - [ ] Backend server running (port 5000)
 - [ ] Frontend server running (port 3000)
 - [ ] Test user registered
 - [ ] Sample data created
+- [ ] Test email sent successfully
 
 ### Troubleshooting
 
@@ -1955,10 +2271,30 @@ db.users.find()              # Query users
    - Verify token format (Bearer <token>)
    - Check token expiry
 
-4. **Email Sending Fails**
-   - Verify SMTP credentials
+4. **Email Sending Fails (SMTP)**
+   - Verify SMTP credentials in .env
    - Check Ethereal account status
    - Review emailService.js initialization
+   - Enable USE_GMAIL_OAUTH for production
+
+5. **Gmail OAuth Errors**
+   - **"Invalid login: 535-5.7.8"**: SMTP verification failed (expected with OAuth, doesn't affect Gmail API)
+   - **"Request had insufficient authentication scopes"**: Refresh token missing required scopes, re-consent needed
+   - **"invalid_grant"**: Refresh token expired or revoked, obtain new token via /api/auth/google/url
+   - **"redirect_uri_mismatch"**: Ensure redirect URI in code matches Google Cloud Console exactly
+   - **Missing refresh_token in callback**: Must use access_type='offline' and prompt='consent'
+
+6. **Gmail API Quota Exceeded**
+   - Standard Gmail: 2,000 emails/day limit
+   - Google Workspace: 10,000 emails/day limit
+   - Check quota usage in Google Cloud Console
+   - Implement exponential backoff retry logic
+
+7. **Draft Not Visible in Gmail**
+   - Verify GOOGLE_REFRESH_TOKEN is set correctly
+   - Check OAuth scopes include 'gmail.compose'
+   - Ensure using correct Gmail account
+   - Check server logs for API errors
 
 ---
 

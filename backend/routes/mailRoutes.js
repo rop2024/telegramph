@@ -9,6 +9,69 @@ const { decryptAES } = require('../utils/crypto');
 
 const router = express.Router();
 
+// Helper function to send email via Gmail API
+async function sendViaGmailAPI(mailOptions) {
+  const {
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    GOOGLE_REFRESH_TOKEN,
+    GMAIL_FROM_ADDRESS
+  } = process.env;
+
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) {
+    throw new Error('Gmail OAuth not configured');
+  }
+
+  const oAuth2Client = new google.auth.OAuth2(
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET
+  );
+
+  oAuth2Client.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
+
+  const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
+
+  // Build MIME message
+  let rawMessage = '';
+  rawMessage += `From: ${mailOptions.from || GMAIL_FROM_ADDRESS}\r\n`;
+  rawMessage += `To: ${mailOptions.to}\r\n`;
+  if (mailOptions.cc) rawMessage += `Cc: ${Array.isArray(mailOptions.cc) ? mailOptions.cc.join(', ') : mailOptions.cc}\r\n`;
+  if (mailOptions.bcc) rawMessage += `Bcc: ${Array.isArray(mailOptions.bcc) ? mailOptions.bcc.join(', ') : mailOptions.bcc}\r\n`;
+  rawMessage += `Subject: ${mailOptions.subject}\r\n`;
+  
+  // Add custom headers if present
+  if (mailOptions.headers) {
+    Object.keys(mailOptions.headers).forEach(key => {
+      rawMessage += `${key}: ${mailOptions.headers[key]}\r\n`;
+    });
+  }
+  
+  rawMessage += 'MIME-Version: 1.0\r\n';
+  rawMessage += 'Content-Type: text/html; charset=UTF-8\r\n';
+  rawMessage += '\r\n';
+  rawMessage += mailOptions.html || mailOptions.text || '';
+
+  // Gmail API expects base64url encoded string
+  const encodedMessage = Buffer.from(rawMessage)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  const sendRes = await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: {
+      raw: encodedMessage
+    }
+  });
+
+  return {
+    messageId: `<${sendRes.data.id}@gmail.com>`,
+    gmailMessageId: sendRes.data.id,
+    threadId: sendRes.data.threadId
+  };
+}
+
 // Handler for sending a test email (shared between dev/public and protected versions)
 const sendTestHandler = async (req, res) => {
   // Wait briefly for emailService to finish initialization (useful in dev/test flows)
@@ -32,8 +95,11 @@ const sendTestHandler = async (req, res) => {
       });
     }
 
+    // Use Gmail address if Gmail OAuth is enabled, otherwise use EMAIL_USER
+    const fromEmail = process.env.GMAIL_FROM_ADDRESS || process.env.EMAIL_USER;
+    
     const mailOptions = {
-      from: `"Telegraph" <${process.env.EMAIL_USER}>`,
+      from: `"Telegraph" <${fromEmail}>`,
       to: to,
       subject: subject,
       text: body.replace(/<[^>]*>/g, ''), // Plain text version
@@ -104,8 +170,33 @@ router.post('/send', protect, async (req, res) => {
       });
     }
 
-    // Decrypt receiver email
-    const decryptedEmail = receiver.decryptedEmail;
+    // Decrypt receiver email using the virtual property
+    let decryptedEmail;
+    try {
+      decryptedEmail = receiver.decryptedEmail;
+      if (!decryptedEmail || typeof decryptedEmail !== 'string') {
+        throw new Error('Email decryption returned invalid value');
+      }
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(decryptedEmail)) {
+        throw new Error('Decrypted email has invalid format');
+      }
+    } catch (error) {
+      console.error('❌ Failed to decrypt receiver email:', error.message);
+      console.error('   Receiver ID:', receiverId);
+      console.error('   Encrypted email:', receiver.email);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to decrypt receiver email',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+
+    console.log('📧 Preparing to send email...');
+    console.log('   Draft:', draft.title || draft._id);
+    console.log('   To:', receiver.name, '<' + decryptedEmail + '>');
+    console.log('   Subject:', draft.subject);
 
     // Create mail log entry
     const mailLog = await MailLog.create({
@@ -129,9 +220,13 @@ router.post('/send', protect, async (req, res) => {
       mailLog.trackingId
     );
 
+    // Use Gmail address if Gmail OAuth is enabled, otherwise use EMAIL_USER
+    const fromEmail = process.env.GMAIL_FROM_ADDRESS || process.env.EMAIL_USER;
+    const fromName = req.user.name || 'Telegraph';
+
     // Prepare email
     const mailOptions = {
-      from: `"${req.user.name}" <${process.env.EMAIL_USER}>`,
+      from: `"${fromName}" <${fromEmail}>`,
       to: `"${receiver.name}" <${decryptedEmail}>`,
       subject: draft.subject,
       text: processedBody.replace(/<[^>]*>/g, ''), // Plain text version
@@ -152,8 +247,40 @@ router.post('/send', protect, async (req, res) => {
       mailOptions.bcc = draft.bcc.join(', ');
     }
 
-    // Send email
-    const result = await emailService.sendEmail(mailOptions, mailLog._id);
+    // Send email - Use Gmail API if configured, otherwise fallback to SMTP
+    let result;
+    const useGmailAPI = String(process.env.USE_GMAIL_OAUTH || '').toLowerCase() === 'true';
+    
+    try {
+      if (useGmailAPI) {
+        console.log('📤 Sending via Gmail API...');
+        result = await sendViaGmailAPI(mailOptions);
+        
+        // Update mail log with Gmail API response
+        await MailLog.findByIdAndUpdate(mailLog._id, {
+          status: 'sent',
+          messageId: result.messageId,
+          providerMessageId: result.gmailMessageId,
+          emailProvider: 'gmail-api',
+          sentAt: new Date()
+        });
+        
+        console.log('✅ Email sent successfully via Gmail API');
+        console.log('   Message ID:', result.gmailMessageId);
+        console.log('   Thread ID:', result.threadId);
+      } else {
+        console.log('📤 Sending via SMTP...');
+        result = await emailService.sendEmail(mailOptions, mailLog._id);
+        console.log('✅ Email sent successfully via SMTP');
+      }
+    } catch (error) {
+      console.error('❌ Email sending failed:', error.message);
+      await MailLog.findByIdAndUpdate(mailLog._id, {
+        status: 'failed',
+        errorMessage: error.message
+      });
+      throw error;
+    }
 
     // Update draft status if this is the first email being sent
     if (draft.status === 'draft') {
@@ -166,7 +293,8 @@ router.post('/send', protect, async (req, res) => {
       data: {
         mailLog: mailLog._id,
         trackingId: mailLog.trackingId,
-        ...result
+        messageId: result.messageId || result.gmailMessageId,
+        provider: useGmailAPI ? 'gmail-api' : 'smtp'
       }
     });
   } catch (error) {
@@ -423,9 +551,35 @@ router.post('/send-bulk', protect, async (req, res) => {
     const emails = [];
     const mailLogs = [];
 
+    // Use Gmail address if Gmail OAuth is enabled, otherwise use EMAIL_USER
+    const fromEmail = process.env.GMAIL_FROM_ADDRESS || process.env.EMAIL_USER;
+    const fromName = req.user.name || 'Telegraph';
+
+    console.log(`📧 Preparing to send bulk email to ${receivers.length} receivers...`);
+    console.log('   Draft:', draft.title || draft._id);
+    console.log('   Subject:', draft.subject);
+
     for (const receiver of receivers) {
-      // Decrypt receiver email
-      const decryptedEmail = receiver.decryptedEmail;
+      // Decrypt receiver email using the virtual property
+      let decryptedEmail;
+      try {
+        decryptedEmail = receiver.decryptedEmail;
+        if (!decryptedEmail || typeof decryptedEmail !== 'string') {
+          throw new Error('Email decryption returned invalid value');
+        }
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(decryptedEmail)) {
+          throw new Error('Decrypted email has invalid format');
+        }
+      } catch (error) {
+        console.warn(`⚠️  Skipping receiver ${receiver._id}: ${error.message}`);
+        console.warn(`   Receiver name: ${receiver.name}`);
+        console.warn(`   Encrypted email: ${receiver.email}`);
+        continue;
+      }
+
+      console.log(`   → ${receiver.name} <${decryptedEmail}>`);
 
       // Create mail log entry
       const mailLog = new MailLog({
@@ -455,7 +609,7 @@ router.post('/send-bulk', protect, async (req, res) => {
 
       // Prepare email
       const mailOptions = {
-        from: `"${req.user.name}" <${process.env.EMAIL_USER}>`,
+        from: `"${fromName}" <${fromEmail}>`,
         to: `"${receiver.name}" <${decryptedEmail}>`,
         subject: draft.subject,
         text: processedBody.replace(/<[^>]*>/g, ''),
@@ -482,8 +636,78 @@ router.post('/send-bulk', protect, async (req, res) => {
       });
     }
 
-    // Send bulk emails
-    const results = await emailService.sendBulkEmails(emails, batchDelay);
+    // Validate that we have at least one email to send
+    if (emails.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid receiver emails found. All receivers failed email decryption.'
+      });
+    }
+
+    console.log(`✅ ${emails.length} emails prepared, starting send process...`);
+
+    // Send bulk emails - Use Gmail API if configured, otherwise fallback to SMTP
+    const useGmailAPI = String(process.env.USE_GMAIL_OAUTH || '').toLowerCase() === 'true';
+    let results;
+
+    if (useGmailAPI) {
+      console.log('📤 Sending bulk emails via Gmail API...');
+      results = {
+        successful: 0,
+        failed: 0,
+        total: emails.length,
+        details: []
+      };
+
+      for (let i = 0; i < emails.length; i++) {
+        const email = emails[i];
+        
+        try {
+          const result = await sendViaGmailAPI(email.mailOptions);
+          
+          // Update mail log
+          await MailLog.findByIdAndUpdate(email.mailLogId, {
+            status: 'sent',
+            messageId: result.messageId,
+            providerMessageId: result.gmailMessageId,
+            emailProvider: 'gmail-api',
+            sentAt: new Date()
+          });
+
+          results.successful++;
+          results.details.push({
+            email: email.mailOptions.to,
+            status: 'success',
+            messageId: result.gmailMessageId
+          });
+          
+          console.log(`   ✅ Sent ${i + 1}/${emails.length}: ${email.mailOptions.to}`);
+        } catch (error) {
+          // Update mail log with error
+          await MailLog.findByIdAndUpdate(email.mailLogId, {
+            status: 'failed',
+            errorMessage: error.message
+          });
+
+          results.failed++;
+          results.details.push({
+            email: email.mailOptions.to,
+            status: 'failed',
+            error: error.message
+          });
+          
+          console.error(`   ❌ Failed ${i + 1}/${emails.length}: ${email.mailOptions.to} - ${error.message}`);
+        }
+
+        // Add delay between emails to avoid rate limiting
+        if (i < emails.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, batchDelay));
+        }
+      }
+    } else {
+      console.log('📤 Sending bulk emails via SMTP...');
+      results = await emailService.sendBulkEmails(emails, batchDelay);
+    }
 
     // Update draft status
     await Draft.findByIdAndUpdate(draftId, { status: 'sent' });
@@ -785,6 +1009,10 @@ router.post('/retry/:mailLogId', protect, async (req, res) => {
       });
     }
 
+    // Use Gmail address if Gmail OAuth is enabled, otherwise use EMAIL_USER
+    const fromEmail = process.env.GMAIL_FROM_ADDRESS || process.env.EMAIL_USER;
+    const fromName = req.user.name || 'Telegraph';
+
     // Process body with tracking
     const processedBody = emailService.processBodyWithTracking(
       mailLog.body, 
@@ -793,7 +1021,7 @@ router.post('/retry/:mailLogId', protect, async (req, res) => {
 
     // Prepare email
     const mailOptions = {
-      from: `"${req.user.name}" <${process.env.EMAIL_USER}>`,
+      from: `"${fromName}" <${fromEmail}>`,
       to: `"${mailLog.receiverName}" <${mailLog.receiverEmail}>`,
       subject: mailLog.subject,
       text: processedBody.replace(/<[^>]*>/g, ''),

@@ -13,6 +13,7 @@ const authRoutes = require('./routes/authRoutes');
 const receiverRoutes = require('./routes/receiverRoutes');
 const draftRoutes = require('./routes/draftRoutes');
 const mailRoutes = require('./routes/mailRoutes');
+const authGoogleRoutes = require('./routes/authGoogle');
 
 // Connect to database
 connectDB();
@@ -76,6 +77,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/receivers', receiverRoutes);
 app.use('/api/drafts', draftRoutes);
 app.use('/api/mail', mailRoutes);
+// Google OAuth helper for obtaining one-time refresh token (Gmail send scope)
+app.use('/api/auth/google', authGoogleRoutes);
 
 // Handle undefined routes (catch-all)
 // Use a no-path middleware to avoid passing a path pattern to path-to-regexp

@@ -101,7 +101,7 @@ const mailLogSchema = new mongoose.Schema({
 // Indexes for better query performance
 mailLogSchema.index({ user: 1, sentAt: -1 });
 mailLogSchema.index({ receiverEmail: 1 });
-mailLogSchema.index({ messageId: 1 }, { unique: true, sparse: true });
+mailLogSchema.index({ messageId: 1 }); // Not unique - multiple failed sends can have null messageId
 mailLogSchema.index({ status: 1 });
 mailLogSchema.index({ trackingId: 1 }, { unique: true, sparse: true });
 mailLogSchema.index({ draft: 1 });

@@ -278,6 +278,103 @@ router.post('/create-draft-gmail', protect, async (req, res) => {
   }
 });
 
+// @desc    Send email directly via Gmail API
+// @route   POST /api/mail/send-gmail
+// @access  Private
+router.post('/send-gmail', protect, async (req, res) => {
+  try {
+    const { to, subject, body, cc, bcc } = req.body;
+
+    if (!to || !subject) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide recipient (to) and subject'
+      });
+    }
+
+    const {
+      GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET,
+      GOOGLE_REFRESH_TOKEN,
+      GMAIL_FROM_ADDRESS
+    } = process.env;
+
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) {
+      return res.status(500).json({
+        success: false,
+        message: 'Google OAuth is not configured on the server (missing env vars)'
+      });
+    }
+
+    console.log('📤 Sending email via Gmail API...');
+    console.log(`   From: ${GMAIL_FROM_ADDRESS || process.env.EMAIL_USER}`);
+    console.log(`   To: ${to}`);
+    console.log(`   Subject: ${subject}`);
+
+    const oAuth2Client = new google.auth.OAuth2(
+      GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET
+    );
+
+    oAuth2Client.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
+
+    const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
+
+    // Build MIME message
+    let rawMessage = '';
+    rawMessage += `From: ${GMAIL_FROM_ADDRESS || process.env.EMAIL_USER}\r\n`;
+    rawMessage += `To: ${to}\r\n`;
+    if (cc) rawMessage += `Cc: ${Array.isArray(cc) ? cc.join(', ') : cc}\r\n`;
+    if (bcc) rawMessage += `Bcc: ${Array.isArray(bcc) ? bcc.join(', ') : bcc}\r\n`;
+    rawMessage += `Subject: ${subject}\r\n`;
+    rawMessage += 'MIME-Version: 1.0\r\n';
+    rawMessage += 'Content-Type: text/html; charset=UTF-8\r\n';
+    rawMessage += '\r\n';
+    rawMessage += body || '';
+
+    // Gmail API expects base64url encoded string
+    const encodedMessage = Buffer.from(rawMessage)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    console.log('🔐 Calling Gmail API to send message...');
+    const sendRes = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: encodedMessage
+      }
+    });
+
+    const messageId = sendRes && sendRes.data && sendRes.data.id;
+    const threadId = sendRes && sendRes.data && sendRes.data.threadId;
+
+    console.log('✅ Email sent successfully via Gmail API');
+    console.log(`   Message ID: ${messageId}`);
+    console.log(`   Thread ID: ${threadId}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Email sent via Gmail',
+      id: messageId,
+      messageId,
+      threadId,
+      data: sendRes.data
+    });
+  } catch (error) {
+    console.error('❌ Send Gmail error:', error.message);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('📋 Error details:', error);
+    }
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send email via Gmail',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 // @desc    Send bulk emails
 // @route   POST /api/mail/send-bulk
 // @access  Private

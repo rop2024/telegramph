@@ -1,48 +1,134 @@
 const nodemailer = require('nodemailer');
+const { google } = require('googleapis');
 const MailLog = require('../models/MailLog');
 
 class EmailService {
   constructor() {
     this.transporter = null;
     this.isConnected = false;
-    this.init();
+    this.lastError = null;
+    // expose a promise that resolves when initialization finishes
+    this.ready = this.init();
   }
 
   async init() {
     try {
-      // Create Ethereal test account if no credentials provided
-      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-        console.log('📧 Creating Ethereal test account...');
-        const testAccount = await nodemailer.createTestAccount();
+      // Decide between Ethereal/smtp auth and Gmail OAuth2
+      const useGmailOauth = String(process.env.USE_GMAIL_OAUTH || '').toLowerCase() === 'true';
+
+      if (useGmailOauth) {
+        console.log('📧 Initializing Gmail OAuth2 transporter...');
+
+        const {
+          GOOGLE_CLIENT_ID,
+          GOOGLE_CLIENT_SECRET,
+          GOOGLE_REFRESH_TOKEN,
+          GMAIL_FROM_ADDRESS
+        } = process.env;
+
+        if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) {
+          throw new Error('Gmail OAuth configured but GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or GOOGLE_REFRESH_TOKEN is missing');
+        }
+
+        console.log('🔑 Using Gmail account:', GMAIL_FROM_ADDRESS || process.env.EMAIL_USER);
+        console.log('🔐 Obtaining access token from refresh token...');
+
+        const oauth2Client = new google.auth.OAuth2(
+          GOOGLE_CLIENT_ID,
+          GOOGLE_CLIENT_SECRET
+        );
+
+        oauth2Client.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
+
+        // googleapis getAccessToken returns a Promise-like object
+        const accessTokenResponse = await oauth2Client.getAccessToken();
+        const accessToken = accessTokenResponse && accessTokenResponse.token ? accessTokenResponse.token : accessTokenResponse;
+
+        if (!accessToken) {
+          throw new Error('Failed to obtain access token via refresh token');
+        }
+
+        console.log('✅ Access token obtained successfully');
+
+        this.transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            type: 'OAuth2',
+            user: GMAIL_FROM_ADDRESS || process.env.EMAIL_USER,
+            clientId: GOOGLE_CLIENT_ID,
+            clientSecret: GOOGLE_CLIENT_SECRET,
+            refreshToken: GOOGLE_REFRESH_TOKEN,
+            accessToken: accessToken
+          },
+          logger: false,
+          debug: false
+        });
+
+        console.log('🔌 Verifying Gmail SMTP connection...');
+        try {
+          await this.transporter.verify();
+          console.log('✅ Gmail OAuth2 transporter ready - email service is operational');
+        } catch (verifyError) {
+          console.log('⚠️  SMTP verification failed (this is common with Gmail OAuth)');
+          console.log('   Gmail API (for drafts) will still work correctly');
+          console.log('   SMTP sending may have issues - use Gmail API methods instead');
+        }
         
-        process.env.EMAIL_USER = testAccount.user;
-        process.env.EMAIL_PASS = testAccount.pass;
-        
-        console.log('✅ Ethereal account created:', testAccount.user);
-        console.log('🔑 Password:', testAccount.pass);
+        this.isConnected = true;
+        console.log('✅ Gmail OAuth2 service initialized - draft creation available');
+      } else {
+        // Create Ethereal test account if no credentials provided
+        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+          console.log('📧 Creating Ethereal test account...');
+          const testAccount = await nodemailer.createTestAccount();
+          
+          process.env.EMAIL_USER = testAccount.user;
+          process.env.EMAIL_PASS = testAccount.pass;
+          
+          console.log('✅ Ethereal account created:', testAccount.user);
+          console.log('🔑 Password:', testAccount.pass);
+        }
+
+        this.transporter = nodemailer.createTransport({
+          host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
+          port: parseInt(process.env.EMAIL_PORT) || 587,
+          secure: false,
+          auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+          },
+          // Add better error handling
+          logger: process.env.NODE_ENV === 'development',
+          debug: process.env.NODE_ENV === 'development',
+        });
+
+        // Verify connection
+        await this.transporter.verify();
+        this.isConnected = true;
+        console.log('✅ Email transporter is ready');
       }
-
-      this.transporter = nodemailer.createTransport({
-        host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
-        port: parseInt(process.env.EMAIL_PORT) || 587,
-        secure: false,
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
-        // Add better error handling
-        logger: process.env.NODE_ENV === 'development',
-        debug: process.env.NODE_ENV === 'development',
-      });
-
-      // Verify connection
-      await this.transporter.verify();
-      this.isConnected = true;
-      console.log('✅ Email transporter is ready');
     } catch (error) {
-      console.error('❌ Email service initialization failed:', error.message);
-      console.error('Full error:', error);
+      this.lastError = error;
+      console.error('❌ Gmail OAuth2 initialization failed:', error.message);
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.error('📋 Error details:', error.stack);
+        console.log('⚠️  Check your Google OAuth credentials in .env:');
+        console.log('   - GOOGLE_CLIENT_ID');
+        console.log('   - GOOGLE_CLIENT_SECRET');
+        console.log('   - GOOGLE_REFRESH_TOKEN');
+        console.log('   - GMAIL_FROM_ADDRESS');
+        console.log('');
+        console.log('💡 To obtain a valid refresh token with compose scope:');
+        console.log('   1. Visit: http://localhost:5000/api/auth/google/url');
+        console.log('   2. Follow the consent URL and sign in');
+        console.log('   3. Copy the refresh_token from the callback response');
+        console.log('   4. Update GOOGLE_REFRESH_TOKEN in .env');
+        console.log('');
+      }
+      
       this.isConnected = false;
+      // Do not fall back to Ethereal - fail clearly if Gmail OAuth is configured but broken
     }
   }
 
@@ -55,14 +141,19 @@ class EmailService {
     }
 
     try {
+      console.log(`📤 Sending email to: ${mailOptions.to}`);
+      
       // Send email
       const info = await this.transporter.sendMail(mailOptions);
       
-      // Get preview URL from Ethereal
+      // Get preview URL from Ethereal (only for non-Gmail providers)
       const previewUrl = nodemailer.getTestMessageUrl(info);
       
-      console.log(`✅ Email sent: ${info.messageId}`);
-      console.log(`📊 Preview URL: ${previewUrl}`);
+      console.log(`✅ Email sent successfully`);
+      console.log(`   Message ID: ${info.messageId}`);
+      if (previewUrl) {
+        console.log(`   Preview URL: ${previewUrl}`);
+      }
 
       // Update mail log
       if (mailLogId) {
@@ -82,7 +173,7 @@ class EmailService {
         response: info.response
       };
     } catch (error) {
-      console.error('❌ Email sending failed:', error);
+      console.error('❌ Email sending failed:', error.message);
 
       // Update mail log with error
       if (mailLogId) {
@@ -193,11 +284,21 @@ class EmailService {
    * Get email service status
    */
   getStatus() {
-    return {
+    const provider = String(process.env.USE_GMAIL_OAUTH || '').toLowerCase() === 'true' ? 'gmail-oauth2' : (process.env.EMAIL_HOST || 'smtp');
+
+    const status = {
       isConnected: this.isConnected,
-      emailUser: process.env.EMAIL_USER,
+      provider,
+      // When using Gmail OAuth prefer the gmail address as the sending user
+      emailUser: provider === 'gmail-oauth2' ? (process.env.GMAIL_FROM_ADDRESS || process.env.EMAIL_USER) : (process.env.EMAIL_USER || process.env.GMAIL_FROM_ADDRESS),
       maxReceiversPerBatch: process.env.MAX_RECEIVERS_PER_BATCH || 50
     };
+
+    if (process.env.NODE_ENV === 'development' && this.lastError) {
+      status.lastError = this.lastError.message || String(this.lastError);
+    }
+
+    return status;
   }
 }
 

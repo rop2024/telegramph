@@ -4,14 +4,24 @@ const Draft = require('../models/Draft');
 const Receiver = require('../models/Receiver');
 const MailLog = require('../models/MailLog');
 const emailService = require('../utils/emailService');
+const { google } = require('googleapis');
 const { decryptAES } = require('../utils/crypto');
 
 const router = express.Router();
 
-// @desc    Send test email
-// @route   POST /api/mail/send-test
-// @access  Private
-router.post('/send-test', protect, async (req, res) => {
+// Handler for sending a test email (shared between dev/public and protected versions)
+const sendTestHandler = async (req, res) => {
+  // Wait briefly for emailService to finish initialization (useful in dev/test flows)
+  try {
+    const maxWait = 5000; // ms
+    const pollInterval = 250; // ms
+    const start = Date.now();
+    while (!emailService.isConnected && Date.now() - start < maxWait) {
+      await new Promise(r => setTimeout(r, pollInterval));
+    }
+  } catch (e) {
+    // ignore
+  }
   try {
     const { to, subject, body } = req.body;
 
@@ -32,9 +42,12 @@ router.post('/send-test', protect, async (req, res) => {
 
     const result = await emailService.sendEmail(mailOptions);
 
+    // Return messageId explicitly so callers (and Gmail OAuth users) can see the provider message id
     res.status(200).json({
       success: true,
       message: 'Test email sent successfully',
+      messageId: result && result.messageId,
+      previewUrl: result && result.previewUrl,
       data: result
     });
   } catch (error) {
@@ -45,7 +58,11 @@ router.post('/send-test', protect, async (req, res) => {
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
-});
+};
+
+// Register send-test route: always protected (requires JWT)
+// Returns messageId from the provider (for Gmail OAuth this will be the Gmail message id).
+router.post('/send-test', protect, async (req, res) => sendTestHandler(req, res));
 
 // @desc    Send email to single receiver
 // @route   POST /api/mail/send
@@ -157,6 +174,105 @@ router.post('/send', protect, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error sending email',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @desc    Create a Gmail draft (saved in the sender's Drafts folder)
+// @route   POST /api/mail/create-draft-gmail
+// @access  Private
+router.post('/create-draft-gmail', protect, async (req, res) => {
+  try {
+    const { to, subject, body, cc, bcc } = req.body;
+
+    if (!to || !subject || !body) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide recipient (to), subject and body for the draft'
+      });
+    }
+
+    const {
+      GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET,
+      GOOGLE_REFRESH_TOKEN,
+      GMAIL_FROM_ADDRESS
+    } = process.env;
+
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REFRESH_TOKEN) {
+      return res.status(500).json({
+        success: false,
+        message: 'Google OAuth is not configured on the server (missing env vars)'
+      });
+    }
+
+    console.log('📝 Creating Gmail draft...');
+    console.log(`   From: ${GMAIL_FROM_ADDRESS || process.env.EMAIL_USER}`);
+    console.log(`   To: ${to}`);
+    console.log(`   Subject: ${subject}`);
+
+    const oAuth2Client = new google.auth.OAuth2(
+      GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET
+    );
+
+    oAuth2Client.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
+
+    const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
+
+    // Build a simple HTML MIME message. For more complex needs build multipart/alternative.
+    let rawMessage = '';
+    rawMessage += `From: ${GMAIL_FROM_ADDRESS || process.env.EMAIL_USER}\r\n`;
+    rawMessage += `To: ${to}\r\n`;
+    if (cc) rawMessage += `Cc: ${Array.isArray(cc) ? cc.join(', ') : cc}\r\n`;
+    if (bcc) rawMessage += `Bcc: ${Array.isArray(bcc) ? bcc.join(', ') : bcc}\r\n`;
+    rawMessage += `Subject: ${subject}\r\n`;
+    rawMessage += 'MIME-Version: 1.0\r\n';
+    rawMessage += 'Content-Type: text/html; charset=UTF-8\r\n';
+    rawMessage += '\r\n';
+    rawMessage += body;
+
+    // Gmail API expects base64url encoded string (no padding, +/ replaced)
+    const encodedMessage = Buffer.from(rawMessage)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    console.log('🔐 Calling Gmail API to create draft...');
+    const createRes = await gmail.users.drafts.create({
+      userId: 'me',
+      requestBody: {
+        message: {
+          raw: encodedMessage
+        }
+      }
+    });
+
+    const draftId = createRes && createRes.data && createRes.data.id;
+    const messageId = createRes && createRes.data && createRes.data.message && createRes.data.message.id;
+
+    console.log('✅ Gmail draft created successfully');
+    console.log(`   Draft ID: ${draftId}`);
+    console.log(`   Message ID: ${messageId}`);
+    console.log('   📥 Check Gmail Drafts folder to see the draft');
+
+    res.status(200).json({
+      success: true,
+      message: 'Gmail draft created',
+      draftId,
+      messageId,
+      data: createRes.data
+    });
+  } catch (error) {
+    console.error('❌ Create Gmail draft error:', error.message);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('📋 Error details:', error);
+    }
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create Gmail draft',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
@@ -536,8 +652,8 @@ router.get('/analytics', protect, async (req, res) => {
 
 // @desc    Get email service status
 // @route   GET /api/mail/status
-// @access  Private
-router.get('/status', protect, async (req, res) => {
+// @access  Public (read-only; returns limited debug info)
+router.get('/status', async (req, res) => {
   try {
     const status = emailService.getStatus();
     

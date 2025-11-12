@@ -5,11 +5,32 @@ import {
   FileText, 
   Mail, 
   BarChart3, 
-  ArrowUp,
-  ArrowDown,
   Plus
 } from 'lucide-react';
 import { draftsAPI, receiversAPI, mailAPI } from '../services/api';
+
+// Helper function to format time ago
+const formatTimeAgo = (date) => {
+  const seconds = Math.floor((new Date() - date) / 1000);
+  
+  const intervals = {
+    year: 31536000,
+    month: 2592000,
+    week: 604800,
+    day: 86400,
+    hour: 3600,
+    minute: 60
+  };
+  
+  for (const [unit, secondsInUnit] of Object.entries(intervals)) {
+    const interval = Math.floor(seconds / secondsInUnit);
+    if (interval >= 1) {
+      return `${interval} ${unit}${interval > 1 ? 's' : ''} ago`;
+    }
+  }
+  
+  return 'Just now';
+};
 
 const Dashboard = () => {
   const [stats, setStats] = useState({
@@ -18,6 +39,7 @@ const Dashboard = () => {
     sent: 0,
     deliveryRate: 0
   });
+  const [recentActivity, setRecentActivity] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,11 +48,19 @@ const Dashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
+      console.log('📊 Fetching dashboard data...');
+      
       const [receiversRes, draftsRes, analyticsRes] = await Promise.all([
         receiversAPI.getStats(),
         draftsAPI.getStats(),
         mailAPI.getAnalytics({ period: '7d' })
       ]);
+
+      console.log('✅ Dashboard data fetched successfully');
+      console.log('   Receivers:', receiversRes.data.data.total || 0);
+      console.log('   Drafts:', draftsRes.data.data.total || 0);
+      console.log('   Emails Sent:', analyticsRes.data.data.statistics.sent || 0);
+      console.log('   Recent Activity Items:', analyticsRes.data.data.recentActivity?.length || 0);
 
       setStats({
         receivers: receiversRes.data.data.total || 0,
@@ -38,8 +68,16 @@ const Dashboard = () => {
         sent: analyticsRes.data.data.statistics.sent || 0,
         deliveryRate: analyticsRes.data.data.statistics.deliveryRate || 0
       });
+
+      setRecentActivity(analyticsRes.data.data.recentActivity || []);
+      
     } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
+      console.error('❌ Failed to fetch dashboard data:', error);
+      console.error('   Error message:', error.message);
+      if (error.response) {
+        console.error('   Response status:', error.response.status);
+        console.error('   Response data:', error.response.data);
+      }
     } finally {
       setLoading(false);
     }
@@ -50,8 +88,6 @@ const Dashboard = () => {
       name: 'Total Receivers',
       value: stats.receivers,
       icon: Users,
-      change: '+4.75%',
-      changeType: 'increase',
       href: '/receivers',
       buttonText: 'Add Receiver',
       buttonIcon: Plus
@@ -60,8 +96,6 @@ const Dashboard = () => {
       name: 'Email Drafts',
       value: stats.drafts,
       icon: FileText,
-      change: '+12.5%',
-      changeType: 'increase',
       href: '/drafts',
       buttonText: 'Create Draft',
       buttonIcon: Plus
@@ -70,8 +104,6 @@ const Dashboard = () => {
       name: 'Emails Sent',
       value: stats.sent,
       icon: Mail,
-      change: '+2.5%',
-      changeType: 'increase',
       href: '/logs',
       buttonText: 'View Logs',
       buttonIcon: BarChart3
@@ -80,8 +112,6 @@ const Dashboard = () => {
       name: 'Delivery Rate',
       value: `${stats.deliveryRate}%`,
       icon: BarChart3,
-      change: '+1.2%',
-      changeType: 'increase',
       href: '/analytics',
       buttonText: 'View Analytics',
       buttonIcon: BarChart3
@@ -121,16 +151,6 @@ const Dashboard = () => {
                 <div className="ml-4 flex-1">
                   <p className="text-sm font-medium text-gray-600">{card.name}</p>
                   <p className="text-2xl font-semibold text-gray-900">{card.value}</p>
-                  <div className={`flex items-center text-sm ${
-                    card.changeType === 'increase' ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {card.changeType === 'increase' ? (
-                      <ArrowUp className="h-4 w-4 mr-1" />
-                    ) : (
-                      <ArrowDown className="h-4 w-4 mr-1" />
-                    )}
-                    {card.change}
-                  </div>
                 </div>
               </div>
               <div className="mt-4">
@@ -179,20 +199,81 @@ const Dashboard = () => {
         <div className="card p-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Recent Activity</h3>
           <div className="space-y-3">
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div>
-                <p className="text-sm font-medium text-gray-900">Welcome to Telegraph</p>
-                <p className="text-sm text-gray-500">Get started by creating your first email draft</p>
+            {recentActivity.length > 0 ? (
+              recentActivity.map((activity) => {
+                // Format time ago
+                const timeAgo = formatTimeAgo(new Date(activity.sentAt));
+                
+                // Determine status color and icon
+                const statusConfig = {
+                  sent: { color: 'text-blue-600', bg: 'bg-blue-50', label: 'Sent' },
+                  delivered: { color: 'text-green-600', bg: 'bg-green-50', label: 'Delivered' },
+                  opened: { color: 'text-purple-600', bg: 'bg-purple-50', label: 'Opened' },
+                  clicked: { color: 'text-indigo-600', bg: 'bg-indigo-50', label: 'Clicked' },
+                  failed: { color: 'text-red-600', bg: 'bg-red-50', label: 'Failed' },
+                  bounced: { color: 'text-orange-600', bg: 'bg-orange-50', label: 'Bounced' },
+                  pending: { color: 'text-gray-600', bg: 'bg-gray-50', label: 'Pending' }
+                };
+                
+                const config = statusConfig[activity.status] || statusConfig.pending;
+                
+                return (
+                  <div 
+                    key={activity._id} 
+                    className={`flex items-start justify-between p-3 ${config.bg} rounded-lg border border-gray-100`}
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Mail className={`h-4 w-4 ${config.color}`} />
+                        <p className="text-sm font-medium text-gray-900">
+                          {activity.subject || 'No Subject'}
+                        </p>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${config.color} ${config.bg} border border-current border-opacity-20`}>
+                          {config.label}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-600 ml-6">
+                        To: <span className="font-medium">{activity.receiver?.name || activity.receiverName}</span>
+                        {activity.receiverEmail && (
+                          <span className="text-gray-400"> ({activity.receiverEmail})</span>
+                        )}
+                      </p>
+                      {activity.draft?.title && (
+                        <p className="text-xs text-gray-500 ml-6 mt-0.5">
+                          Draft: {activity.draft.title}
+                        </p>
+                      )}
+                      {activity.openCount > 0 && (
+                        <p className="text-xs text-purple-600 ml-6 mt-0.5">
+                          📖 Opened {activity.openCount} time{activity.openCount > 1 ? 's' : ''}
+                        </p>
+                      )}
+                      {activity.clickCount > 0 && (
+                        <p className="text-xs text-indigo-600 ml-6 mt-0.5">
+                          🔗 Clicked {activity.clickCount} time{activity.clickCount > 1 ? 's' : ''}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-400 whitespace-nowrap ml-3">{timeAgo}</span>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="text-center py-8">
+                <Mail className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-sm font-medium text-gray-900 mb-1">No recent activity</p>
+                <p className="text-sm text-gray-500 mb-4">
+                  Start by creating a draft and sending your first email
+                </p>
+                <Link
+                  to="/drafts/new"
+                  className="btn btn-primary inline-flex items-center text-sm"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Draft
+                </Link>
               </div>
-              <span className="text-xs text-gray-400">Just now</span>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div>
-                <p className="text-sm font-medium text-gray-900">Add your receivers</p>
-                <p className="text-sm text-gray-500">Import or manually add email recipients</p>
-              </div>
-              <span className="text-xs text-gray-400">1 min ago</span>
-            </div>
+            )}
           </div>
         </div>
       </div>

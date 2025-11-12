@@ -6,7 +6,8 @@ import {
   Mail, 
   Users, 
   FileText, 
-  BarChart3, 
+  BarChart3,
+  TrendingUp,
   LogOut,
   ChevronDown,
   Send
@@ -22,6 +23,7 @@ const Layout = ({ children }) => {
     { name: 'Drafts', href: '/drafts', icon: FileText },
     { name: 'Send Mail', href: '/send', icon: Send },
     { name: 'Email Logs', href: '/logs', icon: Mail },
+    { name: 'Analytics', href: '/analytics', icon: TrendingUp },
   ];
 
   return (

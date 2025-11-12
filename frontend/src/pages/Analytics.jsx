@@ -70,7 +70,13 @@ const Analytics = () => {
   }
 
   const { statistics, recentActivity } = analytics;
-  const totalEmails = statistics.sent + statistics.delivered + statistics.opened + statistics.clicked + statistics.failed;
+  
+  // Calculate total emails sent (excluding pending)
+  const totalEmailsSent = (statistics.sent || 0) + (statistics.delivered || 0) + 
+                          (statistics.opened || 0) + (statistics.clicked || 0);
+  
+  // Total including failed
+  const totalEmails = totalEmailsSent + (statistics.failed || 0) + (statistics.bounced || 0);
 
   // Stats cards configuration
   const statsCards = [
@@ -85,8 +91,8 @@ const Analytics = () => {
     },
     {
       name: 'Delivered',
-      value: statistics.delivered,
-      percentage: totalEmails > 0 ? ((statistics.delivered / totalEmails) * 100).toFixed(1) : 0,
+      value: statistics.delivered || 0,
+      percentage: totalEmails > 0 ? (((statistics.delivered || 0) / totalEmails) * 100).toFixed(1) : 0,
       icon: CheckCircle,
       color: 'green',
       bgColor: 'bg-green-100',
@@ -95,8 +101,8 @@ const Analytics = () => {
     },
     {
       name: 'Opened',
-      value: statistics.opened,
-      percentage: totalEmails > 0 ? ((statistics.opened / totalEmails) * 100).toFixed(1) : 0,
+      value: statistics.opened || 0,
+      percentage: totalEmailsSent > 0 ? (((statistics.opened || 0) / totalEmailsSent) * 100).toFixed(1) : 0,
       icon: Eye,
       color: 'purple',
       bgColor: 'bg-purple-100',
@@ -105,8 +111,8 @@ const Analytics = () => {
     },
     {
       name: 'Clicked',
-      value: statistics.clicked,
-      percentage: totalEmails > 0 ? ((statistics.clicked / totalEmails) * 100).toFixed(1) : 0,
+      value: statistics.clicked || 0,
+      percentage: totalEmailsSent > 0 ? (((statistics.clicked || 0) / totalEmailsSent) * 100).toFixed(1) : 0,
       icon: MousePointer,
       color: 'indigo',
       bgColor: 'bg-indigo-100',
@@ -115,8 +121,8 @@ const Analytics = () => {
     },
     {
       name: 'Failed',
-      value: statistics.failed,
-      percentage: totalEmails > 0 ? ((statistics.failed / totalEmails) * 100).toFixed(1) : 0,
+      value: (statistics.failed || 0) + (statistics.bounced || 0),
+      percentage: totalEmails > 0 ? ((((statistics.failed || 0) + (statistics.bounced || 0)) / totalEmails) * 100).toFixed(1) : 0,
       icon: XCircle,
       color: 'red',
       bgColor: 'bg-red-100',
@@ -125,7 +131,7 @@ const Analytics = () => {
     },
     {
       name: 'Open Rate',
-      value: `${statistics.openRate}%`,
+      value: `${statistics.openRate || '0.00'}%`,
       icon: TrendingUp,
       color: 'amber',
       bgColor: 'bg-amber-100',
@@ -138,27 +144,27 @@ const Analytics = () => {
   const engagementMetrics = [
     {
       name: 'Delivery Rate',
-      value: `${statistics.deliveryRate}%`,
+      value: `${statistics.deliveryRate || '0.00'}%`,
       target: '95%',
-      status: parseFloat(statistics.deliveryRate) >= 95 ? 'good' : 'warning'
+      status: parseFloat(statistics.deliveryRate || 0) >= 95 ? 'good' : 'warning'
     },
     {
       name: 'Open Rate',
-      value: `${statistics.openRate}%`,
+      value: `${statistics.openRate || '0.00'}%`,
       target: '20%',
-      status: parseFloat(statistics.openRate) >= 20 ? 'good' : 'warning'
+      status: parseFloat(statistics.openRate || 0) >= 20 ? 'good' : 'warning'
     },
     {
       name: 'Click Rate',
-      value: `${statistics.clickRate}%`,
+      value: `${statistics.clickRate || '0.00'}%`,
       target: '3%',
-      status: parseFloat(statistics.clickRate) >= 3 ? 'good' : 'warning'
+      status: parseFloat(statistics.clickRate || 0) >= 3 ? 'good' : 'warning'
     },
     {
       name: 'Click-to-Open Rate',
-      value: `${statistics.clickToOpenRate}%`,
+      value: `${statistics.clickToOpenRate || '0.00'}%`,
       target: '15%',
-      status: parseFloat(statistics.clickToOpenRate) >= 15 ? 'good' : 'warning'
+      status: parseFloat(statistics.clickToOpenRate || 0) >= 15 ? 'good' : 'warning'
     }
   ];
 
@@ -267,7 +273,7 @@ const Analytics = () => {
                 <Eye className="h-8 w-8 text-purple-600" />
                 <div>
                   <p className="text-sm text-gray-600">Total Opens</p>
-                  <p className="text-xl font-bold text-gray-900">{statistics.totalOpens}</p>
+                  <p className="text-xl font-bold text-gray-900">{statistics.totalOpens || 0}</p>
                 </div>
               </div>
             </div>
@@ -276,7 +282,7 @@ const Analytics = () => {
                 <MousePointer className="h-8 w-8 text-indigo-600" />
                 <div>
                   <p className="text-sm text-gray-600">Total Clicks</p>
-                  <p className="text-xl font-bold text-gray-900">{statistics.totalClicks}</p>
+                  <p className="text-xl font-bold text-gray-900">{statistics.totalClicks || 0}</p>
                 </div>
               </div>
             </div>

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { draftsAPI, receiversAPI, mailAPI } from '../services/api';
-import { Send, Users, FileText } from 'lucide-react';
+import { Send, Users, FileText, Filter } from 'lucide-react';
 
 const SendMail = () => {
   const [drafts, setDrafts] = useState([]);
@@ -19,6 +19,11 @@ const SendMail = () => {
   const [batchDelay, setBatchDelay] = useState(1000);
   const [sendingBulk, setSendingBulk] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
+
+  // Filters for bulk send
+  const [filterCompany, setFilterCompany] = useState('');
+  const [filterDepartment, setFilterDepartment] = useState('');
+  const [filterTags, setFilterTags] = useState('');
 
   // Toast-ish simple messages
   const [message, setMessage] = useState(null);
@@ -51,6 +56,73 @@ const SendMail = () => {
     } finally {
       setLoadingReceivers(false);
     }
+  };
+
+  // Extract unique companies, departments, and tags
+  const uniqueCompanies = useMemo(() => {
+    const companies = new Set();
+    receivers.forEach(r => {
+      if (r.company) companies.add(r.company);
+    });
+    return Array.from(companies).sort();
+  }, [receivers]);
+
+  const uniqueDepartments = useMemo(() => {
+    const departments = new Set();
+    receivers.forEach(r => {
+      if (r.department) departments.add(r.department);
+    });
+    return Array.from(departments).sort();
+  }, [receivers]);
+
+  const uniqueTags = useMemo(() => {
+    const tags = new Set();
+    receivers.forEach(r => {
+      if (r.tags && Array.isArray(r.tags)) {
+        r.tags.forEach(tag => tags.add(tag));
+      }
+    });
+    return Array.from(tags).sort();
+  }, [receivers]);
+
+  // Filter receivers based on selected filters
+  const filteredReceivers = useMemo(() => {
+    let filtered = receivers;
+
+    if (filterCompany) {
+      filtered = filtered.filter(r => r.company === filterCompany);
+    }
+
+    if (filterDepartment) {
+      filtered = filtered.filter(r => r.department === filterDepartment);
+    }
+
+    if (filterTags) {
+      filtered = filtered.filter(r => 
+        r.tags && Array.isArray(r.tags) && r.tags.includes(filterTags)
+      );
+    }
+
+    return filtered;
+  }, [receivers, filterCompany, filterDepartment, filterTags]);
+
+  // Select all filtered receivers
+  const handleSelectAllFiltered = () => {
+    const newSet = new Set();
+    filteredReceivers.forEach(r => newSet.add(r._id));
+    setSelectedBulkReceivers(newSet);
+  };
+
+  // Clear all selections
+  const handleClearSelection = () => {
+    setSelectedBulkReceivers(new Set());
+  };
+
+  // Clear all filters
+  const handleClearFilters = () => {
+    setFilterCompany('');
+    setFilterDepartment('');
+    setFilterTags('');
   };
 
   // Single send
@@ -201,23 +273,127 @@ const SendMail = () => {
               </select>
             </div>
 
+            {/* Filter section */}
+            <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-gray-900 flex items-center">
+                  <Filter className="h-4 w-4 mr-2" />
+                  Filter Receivers
+                </h3>
+                {(filterCompany || filterDepartment || filterTags) && (
+                  <button
+                    onClick={handleClearFilters}
+                    className="text-xs text-primary-600 hover:text-primary-700"
+                  >
+                    Clear Filters
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Company</label>
+                  <select
+                    value={filterCompany}
+                    onChange={(e) => setFilterCompany(e.target.value)}
+                    className="input text-sm"
+                  >
+                    <option value="">All Companies</option>
+                    {uniqueCompanies.map(company => (
+                      <option key={company} value={company}>{company}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Department</label>
+                  <select
+                    value={filterDepartment}
+                    onChange={(e) => setFilterDepartment(e.target.value)}
+                    className="input text-sm"
+                  >
+                    <option value="">All Departments</option>
+                    {uniqueDepartments.map(dept => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Tags</label>
+                  <select
+                    value={filterTags}
+                    onChange={(e) => setFilterTags(e.target.value)}
+                    className="input text-sm"
+                  >
+                    <option value="">All Tags</option>
+                    {uniqueTags.map(tag => (
+                      <option key={tag} value={tag}>#{tag}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Select Receivers</label>
-              <div className="max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Select Receivers ({selectedBulkReceivers.size} of {filteredReceivers.length} selected)
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSelectAllFiltered}
+                    className="text-xs text-primary-600 hover:text-primary-700"
+                  >
+                    Select All
+                  </button>
+                  {selectedBulkReceivers.size > 0 && (
+                    <button
+                      onClick={handleClearSelection}
+                      className="text-xs text-gray-600 hover:text-gray-700"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="max-h-64 overflow-y-auto border border-gray-200 rounded p-2">
                 {loadingReceivers ? (
                   <div className="text-sm text-gray-500">Loading receivers...</div>
-                ) : receivers.length === 0 ? (
-                  <div className="text-sm text-gray-500">No receivers found</div>
+                ) : filteredReceivers.length === 0 ? (
+                  <div className="text-sm text-gray-500">
+                    {receivers.length === 0 ? 'No receivers found' : 'No receivers match the selected filters'}
+                  </div>
                 ) : (
-                  receivers.map(r => (
-                    <label key={r._id} className="flex items-center space-x-3 p-1 rounded hover:bg-gray-50">
+                  filteredReceivers.map(r => (
+                    <label key={r._id} className="flex items-start space-x-3 p-2 rounded hover:bg-gray-50 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={selectedBulkReceivers.has(r._id)}
                         onChange={() => toggleBulkReceiver(r._id)}
-                        className="h-4 w-4"
+                        className="h-4 w-4 mt-0.5"
                       />
-                      <div className="text-sm text-gray-700">{r.name} — {r.email || r.company}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900">{r.name}</div>
+                        <div className="text-xs text-gray-500">{r.email || r.decryptedEmail}</div>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          {r.company && (
+                            <span className="text-xs text-gray-600 bg-white px-2 py-0.5 rounded border border-gray-200">
+                              {r.company}
+                            </span>
+                          )}
+                          {r.department && (
+                            <span className="text-xs text-gray-600 bg-white px-2 py-0.5 rounded border border-gray-200">
+                              {r.department}
+                            </span>
+                          )}
+                          {r.tags && r.tags.length > 0 && (
+                            <span className="text-xs text-primary-600">
+                              {r.tags.map(tag => `#${tag}`).join(' ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </label>
                   ))
                 )}

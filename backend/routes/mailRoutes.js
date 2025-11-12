@@ -913,31 +913,46 @@ router.get('/analytics', protect, async (req, res) => {
     // Get sending statistics
     const stats = await MailLog.getSendingStats(req.user.id, startDate, endDate);
     
-    // Format stats
+    // Format stats - initialize with all status types
     const formattedStats = {
+      pending: 0,
       sent: 0,
       delivered: 0,
       opened: 0,
       clicked: 0,
       failed: 0,
+      bounced: 0,
       totalOpens: 0,
       totalClicks: 0
     };
 
     if (stats && Array.isArray(stats)) {
       stats.forEach(stat => {
-        formattedStats[stat._id] = stat.count;
+        if (stat._id) {
+          formattedStats[stat._id] = stat.count || 0;
+        }
         formattedStats.totalOpens += stat.totalOpens || 0;
         formattedStats.totalClicks += stat.totalClicks || 0;
       });
     }
 
-    // Calculate rates
-    const totalSent = formattedStats.sent + formattedStats.delivered + formattedStats.opened + formattedStats.clicked;
-    formattedStats.deliveryRate = totalSent > 0 ? (formattedStats.delivered / totalSent * 100).toFixed(2) : 0;
-    formattedStats.openRate = totalSent > 0 ? (formattedStats.opened / totalSent * 100).toFixed(2) : 0;
-    formattedStats.clickRate = totalSent > 0 ? (formattedStats.clicked / totalSent * 100).toFixed(2) : 0;
-    formattedStats.clickToOpenRate = formattedStats.opened > 0 ? (formattedStats.clicked / formattedStats.opened * 100).toFixed(2) : 0;
+    // Calculate total emails (all statuses including pending and failed)
+    const totalEmails = formattedStats.pending + formattedStats.sent + formattedStats.delivered + 
+                        formattedStats.opened + formattedStats.clicked + formattedStats.failed + 
+                        formattedStats.bounced;
+    
+    // Calculate successfully sent (excluding pending and failed)
+    const successfullySent = formattedStats.sent + formattedStats.delivered + 
+                             formattedStats.opened + formattedStats.clicked;
+    
+    // Calculate unique opens (emails with at least one open)
+    const uniqueOpens = formattedStats.opened + formattedStats.clicked;
+    
+    // Calculate rates based on successfully sent emails
+    formattedStats.deliveryRate = totalEmails > 0 ? ((successfullySent / totalEmails) * 100).toFixed(2) : '0.00';
+    formattedStats.openRate = successfullySent > 0 ? ((uniqueOpens / successfullySent) * 100).toFixed(2) : '0.00';
+    formattedStats.clickRate = successfullySent > 0 ? ((formattedStats.clicked / successfullySent) * 100).toFixed(2) : '0.00';
+    formattedStats.clickToOpenRate = uniqueOpens > 0 ? ((formattedStats.clicked / uniqueOpens) * 100).toFixed(2) : '0.00';
 
     // Get recent activity
     const recentActivity = await MailLog.find({

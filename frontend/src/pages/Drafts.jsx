@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Filter, Edit, Trash2, Copy, Send } from 'lucide-react';
 import { draftsAPI } from '../services/api';
 
 const Drafts = () => {
+  const navigate = useNavigate();
   const [drafts, setDrafts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -23,10 +25,12 @@ const Drafts = () => {
 
   const fetchDrafts = async () => {
     try {
+      console.log('📋 Fetching drafts...');
       const response = await draftsAPI.getAll();
+      console.log('✅ Drafts loaded:', response.data.data.length);
       setDrafts(response.data.data);
     } catch (error) {
-      console.error('Failed to fetch drafts:', error);
+      console.error('❌ Failed to fetch drafts:', error);
     } finally {
       setLoading(false);
     }
@@ -86,16 +90,20 @@ const Drafts = () => {
         tags: formData.tags.split(',').map(tag => tag.trim()).filter(Boolean)
       };
 
+      console.log(editingDraft ? '📝 Updating draft...' : '✨ Creating new draft...');
+
       if (editingDraft) {
         await draftsAPI.update(editingDraft._id, draftData);
+        console.log('✅ Draft updated successfully');
       } else {
         await draftsAPI.create(draftData);
+        console.log('✅ Draft created successfully');
       }
 
       fetchDrafts();
       handleCloseModal();
     } catch (error) {
-      console.error('Failed to save draft:', error);
+      console.error('❌ Failed to save draft:', error);
       alert('Failed to save draft. Please try again.');
     }
   };
@@ -103,10 +111,12 @@ const Drafts = () => {
   const handleDelete = async (draftId) => {
     if (window.confirm('Are you sure you want to delete this draft?')) {
       try {
+        console.log('🗑️ Deleting draft...');
         await draftsAPI.delete(draftId);
+        console.log('✅ Draft deleted successfully');
         fetchDrafts();
       } catch (error) {
-        console.error('Failed to delete draft:', error);
+        console.error('❌ Failed to delete draft:', error);
         alert('Failed to delete draft. Please try again.');
       }
     }
@@ -114,18 +124,19 @@ const Drafts = () => {
 
   const handleDuplicate = async (draftId) => {
     try {
+      console.log('📋 Duplicating draft...');
       await draftsAPI.duplicate(draftId);
+      console.log('✅ Draft duplicated successfully');
       fetchDrafts();
     } catch (error) {
-      console.error('Failed to duplicate draft:', error);
+      console.error('❌ Failed to duplicate draft:', error);
       alert('Failed to duplicate draft. Please try again.');
     }
   };
 
   const handleSend = (draft) => {
-    // TODO: Implement send functionality - navigate to send page or open send modal
-    console.log('Send draft:', draft);
-    alert('Send functionality will be implemented soon.');
+    console.log('📧 Navigating to send page with draft:', draft._id);
+    navigate('/send', { state: { draft } });
   };
 
   const filteredDrafts = drafts.filter(draft =>
@@ -179,67 +190,92 @@ const Drafts = () => {
       {/* Drafts Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredDrafts.map((draft) => (
-          <div key={draft._id} className="card p-6">
+          <div key={draft._id} className="card p-6 hover:shadow-lg transition-shadow">
             <div className="flex justify-between items-start mb-4">
-              <div>
-                <h3 className="text-lg font-medium text-gray-900 truncate">
+              <div className="flex-1 min-w-0 mr-3">
+                <h3 className="text-lg font-semibold text-gray-900 truncate mb-1">
                   {draft.title}
                 </h3>
-                <p className="text-sm text-gray-500 mt-1">{draft.subject}</p>
+                <p className="text-sm text-gray-600 line-clamp-2">{draft.subject}</p>
               </div>
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${
                 draft.status === 'draft' 
                   ? 'bg-yellow-100 text-yellow-800'
                   : draft.status === 'sent'
                   ? 'bg-green-100 text-green-800'
-                  : 'bg-blue-100 text-blue-800'
+                  : draft.status === 'scheduled'
+                  ? 'bg-blue-100 text-blue-800'
+                  : 'bg-gray-100 text-gray-800'
               }`}>
                 {draft.status}
               </span>
             </div>
 
-            <div className="space-y-3 mb-4">
+            {/* Preview of body */}
+            <div className="mb-4">
+              <p className="text-sm text-gray-500 line-clamp-3">
+                {draft.body?.replace(/<[^>]*>/g, '') || 'No content'}
+              </p>
+            </div>
+
+            <div className="space-y-2 mb-4 pb-4 border-b border-gray-100">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Receivers</span>
-                <span className="font-medium">{draft.receiverCount}</span>
+                <span className="font-medium text-gray-900">{draft.receiverCount || 0}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Last Edited</span>
-                <span className="font-medium">
-                  {new Date(draft.lastEdited).toLocaleDateString()}
+                <span className="text-gray-500">Updated</span>
+                <span className="font-medium text-gray-900">
+                  {new Date(draft.updatedAt || draft.lastEdited).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric'
+                  })}
                 </span>
               </div>
               {draft.category && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Category</span>
-                  <span className="font-medium">{draft.category}</span>
+                  <span className="font-medium text-gray-900">{draft.category}</span>
                 </div>
               )}
             </div>
 
             {draft.tags && draft.tags.length > 0 && (
               <div className="mb-4">
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {draft.tags.slice(0, 3).map((tag, index) => (
                     <span
                       key={index}
-                      className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-primary-100 text-primary-800"
+                      className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-primary-100 text-primary-700"
                     >
-                      {tag}
+                      #{tag}
                     </span>
                   ))}
+                  {draft.tags.length > 3 && (
+                    <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-600">
+                      +{draft.tags.length - 3} more
+                    </span>
+                  )}
                 </div>
               </div>
             )}
 
-            <div className="flex justify-between space-x-2">
+            <div className="flex gap-2">
               <button 
                 className="btn btn-secondary flex-1 flex items-center justify-center text-sm"
                 onClick={() => handleOpenModal(draft)}
                 title="Edit draft"
               >
-                <Edit className="h-4 w-4 mr-1" />
+                <Edit className="h-4 w-4 mr-1.5" />
                 Edit
+              </button>
+              <button 
+                className="btn btn-primary flex items-center justify-center text-sm px-3"
+                onClick={() => handleSend(draft)}
+                title="Send email"
+              >
+                <Send className="h-4 w-4" />
               </button>
               <button 
                 className="btn btn-secondary flex items-center justify-center text-sm px-3"
@@ -249,11 +285,11 @@ const Drafts = () => {
                 <Copy className="h-4 w-4" />
               </button>
               <button 
-                className="btn btn-primary flex items-center justify-center text-sm px-3"
-                onClick={() => handleSend(draft)}
-                title="Send email"
+                className="btn btn-danger flex items-center justify-center text-sm px-3"
+                onClick={() => handleDelete(draft._id)}
+                title="Delete draft"
               >
-                <Send className="h-4 w-4" />
+                <Trash2 className="h-4 w-4" />
               </button>
             </div>
           </div>

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Filter, Edit, Trash2, Copy, Send } from 'lucide-react';
+import { Plus, Search, Filter, Edit, Trash2, Copy, Send, X } from 'lucide-react';
 import { draftsAPI } from '../services/api';
 
 const Drafts = () => {
@@ -8,8 +8,15 @@ const Drafts = () => {
   const [drafts, setDrafts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingDraft, setEditingDraft] = useState(null);
+  
+  // Filter states
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterTag, setFilterTag] = useState('');
+  
   const [formData, setFormData] = useState({
     title: '',
     subject: '',
@@ -139,10 +146,60 @@ const Drafts = () => {
     navigate('/send', { state: { draft } });
   };
 
-  const filteredDrafts = drafts.filter(draft =>
-    draft.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    draft.subject.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Extract unique categories, statuses, and tags
+  const uniqueCategories = useMemo(() => {
+    const categories = new Set();
+    drafts.forEach(draft => {
+      if (draft.category) categories.add(draft.category);
+    });
+    return Array.from(categories).sort();
+  }, [drafts]);
+
+  const uniqueStatuses = useMemo(() => {
+    const statuses = new Set();
+    drafts.forEach(draft => {
+      if (draft.status) statuses.add(draft.status);
+    });
+    return Array.from(statuses).sort();
+  }, [drafts]);
+
+  const uniqueTags = useMemo(() => {
+    const tags = new Set();
+    drafts.forEach(draft => {
+      if (draft.tags && Array.isArray(draft.tags)) {
+        draft.tags.forEach(tag => tags.add(tag));
+      }
+    });
+    return Array.from(tags).sort();
+  }, [drafts]);
+
+  const filteredDrafts = useMemo(() => {
+    return drafts.filter(draft => {
+      // Search filter
+      const matchesSearch = draft.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                           draft.subject.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      // Category filter
+      const matchesCategory = !filterCategory || draft.category === filterCategory;
+      
+      // Status filter
+      const matchesStatus = !filterStatus || draft.status === filterStatus;
+      
+      // Tag filter
+      const matchesTag = !filterTag || (draft.tags && Array.isArray(draft.tags) && draft.tags.includes(filterTag));
+      
+      return matchesSearch && matchesCategory && matchesStatus && matchesTag;
+    });
+  }, [drafts, searchTerm, filterCategory, filterStatus, filterTag]);
+
+  const handleClearFilters = () => {
+    setFilterCategory('');
+    setFilterStatus('');
+    setFilterTag('');
+    setSearchTerm('');
+  };
+
+  const activeFilterCount = [filterCategory, filterStatus, filterTag].filter(Boolean).length;
 
   if (loading) {
     return (
@@ -169,21 +226,134 @@ const Drafts = () => {
 
       {/* Search and Filters */}
       <div className="card p-4 mb-6">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search drafts by title or subject..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="input pl-10"
-            />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search drafts by title or subject..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="input pl-10"
+              />
+            </div>
+            <button 
+              className={`btn ${showFilters ? 'btn-primary' : 'btn-secondary'} flex items-center relative`}
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              <Filter className="h-4 w-4 mr-2" />
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-white bg-red-600 rounded-full">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
           </div>
-          <button className="btn btn-secondary flex items-center">
-            <Filter className="h-4 w-4 mr-2" />
-            Filters
-          </button>
+
+          {/* Filter Panel */}
+          {showFilters && (
+            <div className="border-t border-gray-200 pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-gray-900">Filter Options</h3>
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={handleClearFilters}
+                    className="text-xs text-primary-600 hover:text-primary-700 flex items-center"
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    Clear All
+                  </button>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Category</label>
+                  <select
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value)}
+                    className="input text-sm"
+                  >
+                    <option value="">All Categories</option>
+                    {uniqueCategories.map(category => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
+                  <select
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    className="input text-sm"
+                  >
+                    <option value="">All Statuses</option>
+                    {uniqueStatuses.map(status => (
+                      <option key={status} value={status}>
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Tags</label>
+                  <select
+                    value={filterTag}
+                    onChange={(e) => setFilterTag(e.target.value)}
+                    className="input text-sm"
+                  >
+                    <option value="">All Tags</option>
+                    {uniqueTags.map(tag => (
+                      <option key={tag} value={tag}>#{tag}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Active Filters Display */}
+              {activeFilterCount > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {filterCategory && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-primary-100 text-primary-700">
+                      Category: {filterCategory}
+                      <button
+                        onClick={() => setFilterCategory('')}
+                        className="ml-1.5 hover:text-primary-900"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
+                  {filterStatus && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-primary-100 text-primary-700">
+                      Status: {filterStatus}
+                      <button
+                        onClick={() => setFilterStatus('')}
+                        className="ml-1.5 hover:text-primary-900"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
+                  {filterTag && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-primary-100 text-primary-700">
+                      Tag: #{filterTag}
+                      <button
+                        onClick={() => setFilterTag('')}
+                        className="ml-1.5 hover:text-primary-900"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -301,11 +471,22 @@ const Drafts = () => {
           <div className="mx-auto h-12 w-12 bg-gray-100 rounded-full flex items-center justify-center">
             <Plus className="h-6 w-6 text-gray-400" />
           </div>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No drafts</h3>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">
+            {drafts.length === 0 ? 'No drafts' : 'No drafts match your filters'}
+          </h3>
           <p className="mt-1 text-sm text-gray-500">
-            Get started by creating a new email draft.
+            {drafts.length === 0 
+              ? 'Get started by creating a new email draft.'
+              : 'Try adjusting your search or filter criteria.'
+            }
           </p>
-          <div className="mt-6">
+          <div className="mt-6 flex justify-center gap-3">
+            {drafts.length > 0 && (
+              <button className="btn btn-secondary" onClick={handleClearFilters}>
+                <X className="h-4 w-4 mr-2" />
+                Clear Filters
+              </button>
+            )}
             <button className="btn btn-primary" onClick={() => handleOpenModal()}>
               <Plus className="h-4 w-4 mr-2" />
               Create Draft
